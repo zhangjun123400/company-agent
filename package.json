@@ -1,0 +1,28 @@
+{
+  "name": "smart-agent-feishu-project",
+  "version": "1.0.0",
+  "description": "智慧智能体 — 对接飞书项目需求管理，自动提醒/技术可行性初评/需求澄清",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "tsx src/test.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.37.0",
+    "axios": "^1.7.0",
+    "dayjs": "^1.11.13",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "meeglesdk": "^0.2.1",
+    "pdf-parse": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.0.0",
+    "@types/pdf-parse": "^1.1.4",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}

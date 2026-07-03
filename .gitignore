@@ -1,0 +1,28 @@
+# 智慧智能体 — 暂不上传
+智慧智能体/
+
+# Claude 本地配置
+.claude/
+
+# 环境变量（含密钥）
+.env
+.env.*
+
+# 依赖
+node_modules/
+
+# 日志
+*.log
+
+# 缓存
+*.cache
+.prd_cache.txt
+
+# 编译输出
+dist/
+output/
+
+# 大型二进制
+*.jpg
+*.png
+*.exe
