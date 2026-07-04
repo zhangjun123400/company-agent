@@ -189,7 +189,7 @@ app.get('/auth/callback', async (req, res) => {
     if (senderOpenId) {
       await axios.post(
         'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
-        { receive_id: senderOpenId, msg_type: 'text', content: JSON.stringify({ text: '✅ Wiki 文档读取授权成功！智小协现在可以读取你的飞书文档了。有效期14天，自动续期。' }) },
+        { receive_id: senderOpenId, msg_type: 'text', content: JSON.stringify({ text: '✅ 授权成功！智小协现在可以读取你授权的文档了。有效期14天，到期后需重新授权。' }) },
         { headers: { Authorization: `Bearer ${imToken.data.tenant_access_token}` } }
       ).catch(() => {});
     }

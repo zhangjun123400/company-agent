@@ -59,27 +59,30 @@ async function triggerAnalysis(workItemName: string): Promise<string> {
   } catch (e: unknown) { return `分析出错: ${e instanceof Error ? e.message : String(e)}`; }
 }
 
-async function sendAuthCard(chatId: string): Promise<void> {
+async function sendAuthCard(chatId: string, docName?: string): Promise<void> {
+  const doc = docName || '相关文档';
   const token = await getImToken();
   await axios.post('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id', {
     receive_id: chatId, msg_type: 'interactive',
     content: JSON.stringify({
       config: { wide_screen_mode: true },
-      header: { title: { content: '🔐 Wiki 文档读取授权', tag: 'plain_text' }, template: 'blue' },
+      header: { title: { content: '🔐 文档读取授权申请', tag: 'plain_text' }, template: 'blue' },
       elements: [
-        { tag: 'markdown', content: '智小协需要你的授权才能读取飞书 Wiki 文档（如 PRD）。\n**一次授权，14天自动续期。**' },
-        { tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: '👉 点击授权（飞书内打开）' }, type: 'primary', url: 'http://localhost:3456/auth/feishu-login' }] },
-        { tag: 'hr' }, { tag: 'note', elements: [{ tag: 'plain_text', content: '授权后飞书消息通知你。仅读取权限，不修改任何文档。' }] },
+        { tag: 'markdown', content: `尊敬的同事你好，我是机器人助手智小协。现在申请只读您的文档《${doc}》权限，请予批准，以便我作为项目助手推进进程。十分感谢。\n\n**一次授权，且仅保留14天。**` },
+        { tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: '👉 批准授权（飞书内打开）' }, type: 'primary', url: 'http://localhost:3456/auth/feishu-login' }] },
+        { tag: 'hr' }, { tag: 'note', elements: [{ tag: 'plain_text', content: '仅读取权限，不修改任何文档。14天后需重新授权。' }] },
       ],
     }),
   }, { headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
 }
 
 async function handleManagement(content: string, senderOpenId: string, chatId: string): Promise<string | null> {
-  // 授权
-  if (content.includes('授权') && (content.includes('wiki') || content.includes('文档'))) {
-    await sendAuthCard(chatId);
-    return '已发送授权卡片，点击按钮即可在飞书内完成授权。';
+  // 授权 — 支持指定文档名："授权 萝卜蹲PRD"
+  if (content.includes('授权')) {
+    const docMatch = content.match(/授权[：:\s]*(.+)/);
+    const docName = docMatch ? docMatch[1].trim() : undefined;
+    await sendAuthCard(chatId, docName);
+    return '已发送授权申请卡片，请点击按钮批准。';
   }
   // 新增智能体
   if (content.startsWith('新增智能体') || content.startsWith('添加智能体')) {
