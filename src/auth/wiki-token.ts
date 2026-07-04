@@ -46,7 +46,7 @@ export function storeInitialToken(authResult: {
   cachedToken = {
     access_token: authResult.access_token, refresh_token: authResult.refresh_token,
     expire_at: now + authResult.expires_in * 1000,
-    refresh_expire_at: now + authResult.refresh_expires_in * 1000,
+    refresh_expire_at: now + (authResult.refresh_expires_in || 1209600) * 1000,
   };
   saveToken(cachedToken);
 }
@@ -82,5 +82,5 @@ async function refreshAccessToken(data: WikiTokenData): Promise<string | null> {
 
 export function hasWikiToken(): boolean {
   if (!cachedToken) cachedToken = loadToken();
-  return cachedToken !== null && Date.now() < cachedToken.refresh_expire_at;
+  return cachedToken !== null && Date.now() < cachedToken.expire_at;
 }

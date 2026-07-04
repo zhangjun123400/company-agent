@@ -60,7 +60,7 @@ async function triggerAnalysis(workItemName: string): Promise<string> {
 }
 
 async function sendAuthCard(chatId: string, docName?: string): Promise<void> {
-  const doc = docName || '相关文档';
+  const doc = docName || '该文档';
   const token = await getImToken();
   await axios.post('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id', {
     receive_id: chatId, msg_type: 'interactive',

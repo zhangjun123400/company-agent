@@ -31,9 +31,19 @@ export async function handleNewRequirement(workItemId: string): Promise<{
   const workItem = await getWorkItemDetail(workItemId);
   console.log(`[AutoAnalyzer] 需求名称: ${workItem.name}`);
 
-  const prdText = await extractPrdContent(workItem);
-  if (!prdText) { console.log('[AutoAnalyzer] ⚠ 未找到 PRD'); return { clarificationUrl: '', techReportUrl: '' }; }
-  console.log(`[AutoAnalyzer] PRD 内容长度: ${prdText.length} 字`);
+  const prd = await extractPrdContent(workItem, workItem.name);
+  if (prd.needAuth) {
+    console.log(`[AutoAnalyzer] ⚠ "${workItem.name}" 的 PRD 需要授权`);
+    // 发授权卡片给需求提出人
+    const ownerOpenIds = workItem.owner ? await resolveUserKeys([workItem.owner]) : [];
+    for (const oid of ownerOpenIds) {
+      await sendAuthCardForDoc(oid, workItem.name);
+    }
+    return { clarificationUrl: '', techReportUrl: '' };
+  }
+  if (!prd.text) { console.log('[AutoAnalyzer] ⚠ 未找到 PRD'); return { clarificationUrl: '', techReportUrl: '' }; }
+  console.log(`[AutoAnalyzer] PRD 内容长度: ${prd.text.length} 字`);
+  const prdText = prd.text;
 
   const [clarification, techReport] = await Promise.all([
     analyzePrdForClarification(prdText, workItem.name),
@@ -104,6 +114,22 @@ function saveCheckTime(): void {
   fs.writeFileSync(STATE_FILE, JSON.stringify({ lastCheckedAt: Date.now() }), 'utf-8');
 }
 
+async function sendAuthCardForDoc(openId: string, docName: string): Promise<void> {
+  const token = await getTenantToken();
+  await axios.post('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id', {
+    receive_id: openId, msg_type: 'interactive',
+    content: JSON.stringify({
+      config: { wide_screen_mode: true },
+      header: { title: { content: '🔐 文档读取授权申请', tag: 'plain_text' }, template: 'blue' },
+      elements: [
+        { tag: 'markdown', content: `尊敬的同事你好，我是机器人助手智小协。现在申请只读您的文档《${docName}》权限，请予批准，以便我作为项目助手推进进程。十分感谢。\n\n**一次授权，且仅保留14天。**` },
+        { tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: '👉 批准授权（飞书内打开）' }, type: 'primary', url: 'http://localhost:3456/auth/feishu-login' }] },
+        { tag: 'hr' }, { tag: 'note', elements: [{ tag: 'plain_text', content: '仅读取权限，不修改任何文档。14天后需重新授权。' }] },
+      ],
+    }),
+  }, { headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
+}
+
 // ==================== 辅助 ====================
 
 async function getWorkItemDetail(workItemId: string): Promise<{
@@ -124,24 +150,26 @@ async function getWorkItemDetail(workItemId: string): Promise<{
   };
 }
 
-async function extractPrdContent(workItem: { fields: Record<string, unknown>[] }): Promise<string | null> {
+async function extractPrdContent(workItem: { fields: Record<string, unknown>[] }, docName: string): Promise<{ text: string | null; needAuth: boolean }> {
   for (const f of workItem.fields) {
     const v = f.field_value as string;
-    if (v && typeof v === 'string' && v.includes('feishu.cn/wiki/')) return readWikiByUrl(v);
+    if (v && typeof v === 'string' && v.includes('feishu.cn/wiki/')) {
+      const text = await readWikiByUrl(v, docName);
+      return { text, needAuth: text === null };
+    }
   }
-  for (const f of workItem.fields) {
-    const val = JSON.stringify(f.field_value);
-    const match = val.match(/https?:\/\/[^\s"']+\.feishu\.cn\/wiki\/[^\s"']+/);
-    if (match) return readWikiByUrl(match[0]);
-  }
-  return null;
+  return { text: null, needAuth: false };
 }
 
-async function readWikiByUrl(url: string): Promise<string | null> {
+async function readWikiByUrl(url: string, docName?: string): Promise<string | null> {
   const match = url.match(/\/wiki\/([A-Za-z0-9]+)/);
   if (!match) return null;
   const token = await getWikiAccessToken();
-  if (!token) return null;
+  if (!token) {
+    // 无 token → 需要授权 → 仅记日志，由上层处理
+    console.log('[AutoAnalyzer] Wiki Token 未授权，需要先完成 OAuth 授权');
+    return null;
+  }
   try {
     const nodeRes = await axios.get(`https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node?token=${match[1]}`,
       { headers: { Authorization: `Bearer ${token}` } });

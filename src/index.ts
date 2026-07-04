@@ -179,6 +179,15 @@ app.get('/auth/callback', async (req, res) => {
     userAccessToken = tokenRes.data.data?.access_token;
     console.log('[OAuth] ✅ user_access_token 获取成功:', userAccessToken?.substring(0, 15) + '...');
 
+    // 持久化到文件（供 auto-analyzer 读取）
+    const td = tokenRes.data.data || {};
+    storeInitialToken({
+      access_token: td.access_token,
+      refresh_token: td.refresh_token || '',
+      expires_in: td.expires_in || 7200,
+      refresh_expires_in: td.refresh_expires_in || 1209600,
+    });
+
     // 发飞书消息确认授权成功
     const imToken = await axios.post(
       'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
