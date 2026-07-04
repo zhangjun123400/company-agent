@@ -59,7 +59,28 @@ async function triggerAnalysis(workItemName: string): Promise<string> {
   } catch (e: unknown) { return `分析出错: ${e instanceof Error ? e.message : String(e)}`; }
 }
 
-async function handleManagement(content: string, senderOpenId: string): Promise<string | null> {
+async function sendAuthCard(chatId: string): Promise<void> {
+  const token = await getImToken();
+  await axios.post('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id', {
+    receive_id: chatId, msg_type: 'interactive',
+    content: JSON.stringify({
+      config: { wide_screen_mode: true },
+      header: { title: { content: '🔐 Wiki 文档读取授权', tag: 'plain_text' }, template: 'blue' },
+      elements: [
+        { tag: 'markdown', content: '智小协需要你的授权才能读取飞书 Wiki 文档（如 PRD）。\n**一次授权，14天自动续期。**' },
+        { tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: '👉 点击授权（飞书内打开）' }, type: 'primary', url: 'http://localhost:3456/auth/feishu-login' }] },
+        { tag: 'hr' }, { tag: 'note', elements: [{ tag: 'plain_text', content: '授权后飞书消息通知你。仅读取权限，不修改任何文档。' }] },
+      ],
+    }),
+  }, { headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
+}
+
+async function handleManagement(content: string, senderOpenId: string, chatId: string): Promise<string | null> {
+  // 授权
+  if (content.includes('授权') && (content.includes('wiki') || content.includes('文档'))) {
+    await sendAuthCard(chatId);
+    return '已发送授权卡片，点击按钮即可在飞书内完成授权。';
+  }
   // 新增智能体
   if (content.startsWith('新增智能体') || content.startsWith('添加智能体')) {
     const { createAgentFromMessage } = await import('../core/orchestrator');
@@ -102,7 +123,7 @@ export function startFeishuWS(): void {
         console.log(`[IM] ${chatId}: ${content}`);
 
         // 1. Management commands
-        const mgmt = await handleManagement(content, senderId);
+        const mgmt = await handleManagement(content, senderId, chatId);
         if (mgmt !== null) { await sendIM(chatId, mgmt); return; }
 
         // 2. Analysis trigger

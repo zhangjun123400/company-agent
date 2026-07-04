@@ -138,15 +138,15 @@ async function exchange() {
  * 发起飞书 OAuth 授权（获取 user_access_token 读取 Wiki）
  * GET /auth/feishu-login
  */
-app.get('/auth/feishu-login', (_req, res) => {
-  const state = Math.random().toString(36).substring(2, 10);
+app.get('/auth/feishu-login', (req, res) => {
+  const openId = (req.query.open_id as string) || '';
+  const state = Math.random().toString(36).substring(2, 10) + (openId ? ':' + openId : '');
   const authUrl =
     `https://open.feishu.cn/open-apis/authen/v1/authorize` +
     `?app_id=${FEISHU_APP_ID}` +
     `&redirect_uri=${encodeURIComponent(`http://localhost:${PORT}/auth/callback`)}` +
     `&state=${state}` +
     `&scope=${encodeURIComponent('wiki:wiki wiki:node:read docx:document:readonly')}`;
-  console.log('[OAuth] 授权链接:', authUrl);
   res.redirect(authUrl);
 });
 
@@ -178,6 +178,21 @@ app.get('/auth/callback', async (req, res) => {
 
     userAccessToken = tokenRes.data.data?.access_token;
     console.log('[OAuth] ✅ user_access_token 获取成功:', userAccessToken?.substring(0, 15) + '...');
+
+    // 发飞书消息确认授权成功
+    const imToken = await axios.post(
+      'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
+      { app_id: FEISHU_APP_ID, app_secret: FEISHU_APP_SECRET }
+    );
+    // 从 state 中提取 open_id（授权时传入）
+    const senderOpenId = (state as string)?.split(':')[1] || '';
+    if (senderOpenId) {
+      await axios.post(
+        'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
+        { receive_id: senderOpenId, msg_type: 'text', content: JSON.stringify({ text: '✅ Wiki 文档读取授权成功！智小协现在可以读取你的飞书文档了。有效期14天，自动续期。' }) },
+        { headers: { Authorization: `Bearer ${imToken.data.tenant_access_token}` } }
+      ).catch(() => {});
+    }
 
     res.send(`
       <html><body style="font-family:sans-serif;max-width:500px;margin:60px auto;text-align:center">
