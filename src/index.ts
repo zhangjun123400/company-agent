@@ -421,6 +421,17 @@ app.listen(PORT, () => {
   // 启动多智能体编排引擎
   initOrchestrator();
 
+  // 检查 Wiki Token
+  const { hasWikiToken } = require('./auth/wiki-token');
+  if (!hasWikiToken()) {
+    console.log('');
+    console.log('⚠ Wiki 文档读取需要授权（首次，有效期14天自动续期）：');
+    console.log(`   浏览器打开: http://localhost:${PORT}/auth/feishu-login`);
+    console.log('');
+  } else {
+    console.log('✅ Wiki Token 有效，自动续期中');
+  }
+
   if (!projectConfig.userKey) {
     console.log('⚠ 缺少 user_key，请先获取：');
     console.log('  1. 打开飞书项目页面，F12 控制台执行：');
