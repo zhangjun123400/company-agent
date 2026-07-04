@@ -4,7 +4,8 @@
 # Claude 本地配置
 .claude/
 
-# 环境变量（含密钥）
+# 配置文件（含密钥，不要提交）
+config.env
 .env
 .env.*
 

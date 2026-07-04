@@ -3,12 +3,13 @@
  * 飞书项目 (Meegle) 对接 | 三大 AI 能力
  */
 import express from 'express';
-import { projectConfig } from './config';
+import { projectConfig, feishuApp } from './config';
 import { testConnection, exchangeCodeForUserKey, getWorkItemTypes } from './feishu-project/client';
+import { storeInitialToken } from './auth/wiki-token';
 import axios from 'axios';
 
-const FEISHU_APP_ID = process.env.FEISHU_APP_ID || '';
-const FEISHU_APP_SECRET = process.env.FEISHU_APP_SECRET || '';
+const FEISHU_APP_ID = feishuApp.appId;
+const FEISHU_APP_SECRET = feishuApp.appSecret;
 
 // 缓存 user_access_token
 let userAccessToken: string | null = null;

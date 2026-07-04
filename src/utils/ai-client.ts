@@ -3,9 +3,10 @@
  */
 import axios from 'axios';
 
-const MODEL_PROVIDER = process.env.AI_MODEL || 'deepseek';
-const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY || '';
-const DEEPSEEK_BASE = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
+import { aiModel, deepseekApiKey, deepseekBaseUrl } from '../config';
+const MODEL_PROVIDER = aiModel;
+const DEEPSEEK_KEY = deepseekApiKey;
+const DEEPSEEK_BASE = deepseekBaseUrl;
 
 export interface AiMessage { role: 'system' | 'user' | 'assistant'; content: string; }
 export interface AiCompletionOptions {

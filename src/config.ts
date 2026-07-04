@@ -1,68 +1,57 @@
 /**
  * 配置管理
- * 从环境变量加载，区分飞书项目 API 和飞书 IM 两套凭据
+ * 统一从 config.env 加载所有平台凭据和参数
+ * 修改 config.env 后重启服务即可生效
  */
 import dotenv from 'dotenv';
 import path from 'path';
 
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
+// 优先加载 config.env（集中配置），fallback 到 .env
+dotenv.config({ path: path.resolve(__dirname, '../config.env') });
+dotenv.config({ path: path.resolve(__dirname, '../.env') }); // 兼容旧文件
 
 function requireEnv(key: string): string {
   const value = process.env[key];
   if (!value) {
-    throw new Error(`缺少必需的环境变量: ${key}，请在 .env 文件中配置`);
+    throw new Error(`缺少必需配置: ${key}，请在 config.env 中设置`);
   }
   return value;
 }
-
-function optionalEnv(key: string): string {
-  return process.env[key] || '';
+function optionalEnv(key: string, defaultValue = ''): string {
+  return process.env[key] || defaultValue;
 }
 
-// ==================== 飞书项目 (Meegle) API ====================
+// ==================== 飞书项目平台 ====================
 
 export const projectConfig = {
-  /** 插件 ID */
   pluginId: requireEnv('FEISHU_PROJECT_PLUGIN_ID'),
-  /** 插件 Secret */
   pluginSecret: requireEnv('FEISHU_PROJECT_PLUGIN_SECRET'),
-  /** 用户标识（可选） */
   userKey: optionalEnv('FEISHU_PROJECT_USER_KEY'),
-  /** API 基础路径 */
-  apiBase: optionalEnv('FEISHU_PROJECT_API_BASE') || 'https://project.feishu.cn/open_api',
-  /** 空间 Key（URL 中的标识） */
-  spaceKey: optionalEnv('PROJECT_SPACE_KEY') || 'aniwonder',
-  /** 空间 ID（可选，会自动查询） */
+  apiBase: optionalEnv('FEISHU_PROJECT_API_BASE', 'https://project.feishu.cn/open_api'),
+  spaceKey: optionalEnv('PROJECT_SPACE_KEY', 'aniwonder'),
   spaceId: optionalEnv('PROJECT_SPACE_ID'),
-  /** PRD 未评审超时天数 */
   prdReviewTimeoutDays: parseInt(process.env.PRD_REVIEW_TIMEOUT_DAYS || '3', 10),
 };
 
-// ==================== 飞书 IM（可选，用于发送群消息） ====================
+// ==================== 飞书 IM + 文档（智小协机器人） ====================
 
-export const imConfig = {
-  enabled: !!(process.env.FEISHU_IM_APP_ID && process.env.FEISHU_IM_APP_SECRET),
-  appId: optionalEnv('FEISHU_IM_APP_ID'),
-  appSecret: optionalEnv('FEISHU_IM_APP_SECRET'),
-  chatId: optionalEnv('FEISHU_IM_CHAT_ID'),
+export const feishuApp = {
+  appId: requireEnv('FEISHU_APP_ID'),
+  appSecret: requireEnv('FEISHU_APP_SECRET'),
 };
 
-// ==================== Claude API ====================
+// ==================== 大模型 ====================
 
-export const anthropicApiKey = optionalEnv('ANTHROPIC_API_KEY');
+export const aiModel = optionalEnv('AI_MODEL', 'deepseek');
+export const deepseekApiKey = optionalEnv('DEEPSEEK_API_KEY');
+export const deepseekBaseUrl = optionalEnv('DEEPSEEK_BASE_URL', 'https://api.deepseek.com');
 
 // ==================== 定时任务 ====================
 
-export const checkCron = optionalEnv('CHECK_CRON') || '0 9 * * *';
+export const checkCron = optionalEnv('CHECK_CRON', '0 9 * * *');
 
 // ==================== API 端点常量 ====================
 
-/** 飞书项目 token 端点 */
 export const PLUGIN_TOKEN_URL = 'https://project.feishu.cn/open_api/authen/plugin_token';
-
-/** 飞书 IM token 端点 */
 export const FEISHU_IM_TOKEN_URL = 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal';
-
-/** 构建飞书项目 API URL */
-export const projectApi = (path: string): string =>
-  `${projectConfig.apiBase}${path}`;
+export const projectApi = (p: string) => `${projectConfig.apiBase}${p}`;

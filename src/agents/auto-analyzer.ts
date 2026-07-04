@@ -9,8 +9,9 @@ import { getWikiAccessToken } from '../auth/wiki-token';
 import { analyzePrdForClarification, formatClarificationResult } from './clarification';
 import { analyzePrdForTechFeasibility, formatTechReportResult } from './tech-feasibility';
 
-const FEISHU_APP_ID = process.env.FEISHU_APP_ID || '';
-const FEISHU_APP_SECRET = process.env.FEISHU_APP_SECRET || '';
+import { feishuApp, projectConfig } from '../config';
+const FEISHU_APP_ID = feishuApp.appId;
+const FEISHU_APP_SECRET = feishuApp.appSecret;
 
 let tenantToken: string | null = null;
 async function getTenantToken(): Promise<string> {
@@ -79,7 +80,7 @@ export async function checkDailyNewPrds(): Promise<{ totalFound: number; process
   const t = await getMeegleToken();
   const res = await axios.post('https://project.feishu.cn/open_api/aniwonder/work_item/filter',
     { work_item_type_keys: ['story'], page_size: 50 },
-    { headers: { 'X-Plugin-Token': t, 'X-User-Key': process.env.FEISHU_PROJECT_USER_KEY || '' } });
+    { headers: { 'X-Plugin-Token': t, 'X-User-Key': projectConfig.userKey } });
   const items: Array<{ id: string; name: string; created_at?: number }> = res.data.data?.data || [];
   const newItems = items.filter((item) => (item.created_at || 0) > lastChecked);
   console.log(`[DailyCheck] ${items.length} 个需求，${newItems.length} 个新增`);
@@ -113,7 +114,7 @@ async function getWorkItemDetail(workItemId: string): Promise<{
   const t = await getMeegleToken();
   const res = await axios.post('https://project.feishu.cn/open_api/aniwonder/work_item/story/query',
     { work_item_ids: [parseInt(workItemId, 10)], expand: { need_workflow: true } },
-    { headers: { 'X-Plugin-Token': t, 'X-User-Key': process.env.FEISHU_PROJECT_USER_KEY || '' } });
+    { headers: { 'X-Plugin-Token': t, 'X-User-Key': projectConfig.userKey } });
   const item = (res.data.data || [])[0] || {};
   return {
     name: item.name || '', owner: item.created_by || '',
@@ -219,8 +220,8 @@ let meegleToken: string | null = null;
 async function getMeegleToken(): Promise<string> {
   if (meegleToken) return meegleToken;
   const res = await axios.post('https://project.feishu.cn/open_api/authen/plugin_token', {
-    plugin_id: process.env.FEISHU_PROJECT_PLUGIN_ID || '',
-    plugin_secret: process.env.FEISHU_PROJECT_PLUGIN_SECRET || '', type: 1,
+    plugin_id: projectConfig.pluginId,
+    plugin_secret: projectConfig.pluginSecret, type: 1,
   });
   meegleToken = res.data.data.token as string;
   return meegleToken as string;
