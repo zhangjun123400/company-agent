@@ -26,11 +26,14 @@ async function agentExecutor(agent: AgentConfig, ctx: ExecutionContext): Promise
     return formatTechReportResult(result);
   }
 
-  // 默认：通用分析（调用 DeepSeek 按 description 执行）
+  // 默认：通用分析（使用 Agent 自定义 prompt + skills）
   const { aiComplete } = await import('../utils/ai-client');
   return aiComplete({
-    system: agent.description,
-    messages: [{ role: 'user', content: `上下文: ${JSON.stringify(ctx)}` }],
+    system: agent.prompt || agent.description,
+    messages: [{
+      role: 'user',
+      content: `【任务】${agent.description}\n【技能】${(agent.skills || []).join('、')}\n【上下文】${JSON.stringify(ctx)}`,
+    }],
     maxTokens: 3000,
   });
 }
@@ -71,7 +74,7 @@ export async function createAgentFromMessage(
       content: `从以下描述中提取 Agent 配置信息，输出严格JSON（不要Markdown标记）：
 描述："${description}"
 输出格式：
-{"id":"英文id","name":"中文名","department":"部门","node":"飞书项目节点名","description":"功能描述","skills":["技能1"],"tools":["wiki:read","docx:create"]}`,
+{"id":"英文id","name":"中文名","department":"部门","node":"飞书项目节点名","description":"功能描述","prompt":"系统提示词-定义智能体的身份和行为规则","skills":["技能1","技能2"],"tools":["wiki:read","docx:create"]}`,
     }],
     maxTokens: 500,
   });
