@@ -15,5 +15,5 @@
     "sourceMap": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "src/agents", "src/utils", "src/test.ts"]
+  "exclude": ["node_modules", "dist", "src/agents/overdue-reminder.ts", "src/agents/knowledge-base.ts", "src/utils/feishu-message.ts", "src/utils/prd-parser.ts", "src/test.ts"]
 }

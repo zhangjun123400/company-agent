@@ -2,8 +2,9 @@
  * PRD 文档解析工具
  * 支持从飞书项目附件下载 PRD（PDF/Word/Markdown），提取文本内容
  */
-import { feishuProject } from '../feishu-project';
-import type { Attachment } from '../feishu-project';
+// Old deprecated code — kept for truncateText export only
+// import { feishuProject } from '../feishu-project';
+// import type { Attachment } from '../feishu-project';
 
 /** 解析结果 */
 export interface PrdContent {
@@ -21,6 +22,7 @@ export interface PrdContent {
  * 从工作项的附件中查找并解析 PRD 文档
  * 按优先级：pdf > docx > md > txt
  */
+/** Deprecated — use auto-analyzer extractPrdContent instead
 export async function extractPrdFromWorkItem(
   workItemId: string
 ): Promise<PrdContent | null> {
@@ -69,6 +71,7 @@ export async function extractPrdFromWorkItem(
     return null;
   }
 }
+*/
 
 /**
  * 根据文件扩展名提取文本

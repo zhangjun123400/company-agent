@@ -11,7 +11,7 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { feishuProject } from './feishu-project';
+import * as feishuProject from './feishu-project/client';
 import { projectConfig, imConfig } from './config';
 import {
   runOverdueCheck,
@@ -30,7 +30,7 @@ async function main() {
   console.log('  智慧智能体 功能测试');
   console.log('═══════════════════════════════════════════');
   console.log(`  飞书项目空间: ${projectConfig.spaceKey}`);
-  console.log(`  IM 通知: ${imConfig.enabled ? '✅' : '⚠ 未配置(降级为评论)'}`);
+  console.log(`  IM 通知: ${imConfig?.enabled ? '✅' : '⚠ 未配置(降级为评论)'}`);
   console.log(`  超时阈值: ${projectConfig.prdReviewTimeoutDays} 天`);
   console.log('═══════════════════════════════════════════\n');
 
@@ -61,10 +61,7 @@ async function main() {
       console.log('────── 能力2: 技术可行性初评 ──────');
       const prdType = types.find((t) => ['需求', 'Story', 'story'].includes(t.name));
       if (prdType) {
-        const items = await feishuProject.getAllWorkItems({
-          work_item_type_id: prdType.id,
-          page_size: 3,
-        });
+        const items = await feishuProject.getAllWorkItems(prdType.type_key, 10);
         if (items.length > 0) {
           const report = await generateTechFeasibilityReport(items[0].id);
           if (report) {
@@ -83,10 +80,7 @@ async function main() {
       console.log('────── 能力3: 需求澄清清单 ──────');
       const prdType = types.find((t) => ['需求', 'Story', 'story'].includes(t.name));
       if (prdType) {
-        const items = await feishuProject.getAllWorkItems({
-          work_item_type_id: prdType.id,
-          page_size: 3,
-        });
+        const items = await feishuProject.getAllWorkItems(prdType.type_key, 10);
         if (items.length > 0) {
           const q = await generateClarificationQuestions(items[0].id);
           if (q) {

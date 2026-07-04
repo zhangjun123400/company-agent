@@ -6,6 +6,7 @@ import express from 'express';
 import { projectConfig, feishuApp } from './config';
 import { testConnection, exchangeCodeForUserKey, getWorkItemTypes } from './feishu-project/client';
 import { storeInitialToken } from './auth/wiki-token';
+import { startFeishuWS } from './feishu-im/ws-client';
 import axios from 'axios';
 
 const FEISHU_APP_ID = feishuApp.appId;
@@ -282,6 +283,73 @@ app.post('/auth/exchange', async (req, res) => {
 
 // ==================== 启动 ====================
 
+// ==================== 飞书 IM WebSocket 自动触发 ====================
+
+async function handleIMTrigger(workItemName: string, senderOpenId: string) {
+  // 在飞书项目中搜索需求
+  const pluginRes = await axios.post(
+    'https://project.feishu.cn/open_api/authen/plugin_token',
+    { plugin_id: projectConfig.pluginId, plugin_secret: projectConfig.pluginSecret, type: 1 }
+  );
+  const pToken = pluginRes.data.data.token;
+
+  const searchRes = await axios.post(
+    'https://project.feishu.cn/open_api/compositive_search',
+    { query_type: 'workitem', query: workItemName, page_size: 5 },
+    { headers: { 'X-Plugin-Token': pToken, 'X-User-Key': projectConfig.userKey } }
+  );
+  const items: Array<{ ID: string; name: string }> = searchRes.data.data || [];
+  const found = items.find((i) => i.name && i.name.includes(workItemName));
+
+  // 通过 IM 回复
+  const imToken = await axios.post(
+    'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
+    { app_id: feishuApp.appId, app_secret: feishuApp.appSecret }
+  );
+  const imH = { Authorization: `Bearer ${imToken.data.tenant_access_token}` };
+
+  if (!found) {
+    await axios.post(
+      'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
+      {
+        receive_id: senderOpenId,
+        msg_type: 'text',
+        content: JSON.stringify({ text: `🤖 未找到「${workItemName}」相关需求，请确认需求名称是否正确。` }),
+      },
+      { headers: imH }
+    );
+    return;
+  }
+
+  // 回复确认
+  await axios.post(
+    'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
+    {
+      receive_id: senderOpenId,
+      msg_type: 'text',
+      content: JSON.stringify({ text: `🤖 收到！开始分析「${found.name}」，稍后会将报告发给你。` }),
+    },
+    { headers: imH }
+  );
+
+  // 触发分析
+  const { handleNewRequirement } = await import('./agents/auto-analyzer');
+  const result = await handleNewRequirement(found.ID);
+  if (result.clarificationUrl) {
+    await axios.post(
+      'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
+      {
+        receive_id: senderOpenId,
+        msg_type: 'text',
+        content: JSON.stringify({
+          text: `✅ 「${found.name}」分析完成！\n📋 需求澄清：${result.clarificationUrl}\n📊 技术初评：${result.techReportUrl}`,
+        }),
+      },
+      { headers: imH }
+    );
+  }
+}
+
 app.listen(PORT, () => {
   console.log('');
   console.log('╔══════════════════════════════════════════╗');
@@ -291,8 +359,19 @@ app.listen(PORT, () => {
   console.log(`║  授权     : http://localhost:${PORT}/auth  ║`);
   console.log(`║  空间     : ${projectConfig.spaceKey.padEnd(29)}║`);
   console.log(`║  user_key : ${(projectConfig.userKey ? '✅ 已配置' : '❌ 待获取').padEnd(22)}║`);
+  console.log(`║  IM监听   : ${feishuApp.appId ? '✅ 启动' : '❌ 未配置'.padEnd(0)}              ║`);
   console.log('╚══════════════════════════════════════════╝');
   console.log('');
+
+  // 启动飞书 IM WebSocket 监听
+  if (feishuApp.appId) {
+    try {
+      startFeishuWS(handleIMTrigger);
+    } catch (e) {
+      console.error('⚠ IM WebSocket 启动失败:', e);
+    }
+  }
+
   if (!projectConfig.userKey) {
     console.log('⚠ 缺少 user_key，请先获取：');
     console.log('  1. 打开飞书项目页面，F12 控制台执行：');
