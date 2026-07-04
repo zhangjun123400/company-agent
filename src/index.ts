@@ -359,18 +359,12 @@ app.listen(PORT, () => {
   console.log(`║  授权     : http://localhost:${PORT}/auth  ║`);
   console.log(`║  空间     : ${projectConfig.spaceKey.padEnd(29)}║`);
   console.log(`║  user_key : ${(projectConfig.userKey ? '✅ 已配置' : '❌ 待获取').padEnd(22)}║`);
-  console.log(`║  IM监听   : ${feishuApp.appId ? '✅ 启动' : '❌ 未配置'.padEnd(0)}              ║`);
+  console.log(`║  IM       : ✅ 独立长连接                ║`);
   console.log('╚══════════════════════════════════════════╝');
   console.log('');
 
-  // 启动飞书 IM WebSocket 监听
-  if (feishuApp.appId) {
-    try {
-      startFeishuWS(handleIMTrigger);
-    } catch (e) {
-      console.error('⚠ IM WebSocket 启动失败:', e);
-    }
-  }
+  // 启动飞书 IM WebSocket（独立运行，不依赖 Claude Code）
+  startFeishuWS();
 
   if (!projectConfig.userKey) {
     console.log('⚠ 缺少 user_key，请先获取：');
