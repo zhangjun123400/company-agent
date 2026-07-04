@@ -1,0 +1,15 @@
+{
+  "id": "requirement-analyzer",
+  "name": "需求分析",
+  "department": "软件研发部",
+  "node": "需求评审",
+  "description": "读取PRD需求文档，输出需求澄清问题清单",
+  "skills": ["PRD文档分析", "需求完整性检查", "澄清问题生成"],
+  "tools": ["wiki:read", "docx:create", "im:send"],
+  "output": "feishu_doc",
+  "output_target": ["需求提出人", "节点负责人"],
+  "enabled": true,
+  "timeout_ms": 300000,
+  "created_by": "ou_8de837db0c63b31eaebbb465c18c9ea8",
+  "created_at": "2026-07-04"
+}

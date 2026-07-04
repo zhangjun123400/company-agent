@@ -7,6 +7,10 @@ import { projectConfig, feishuApp } from './config';
 import { testConnection, exchangeCodeForUserKey, getWorkItemTypes } from './feishu-project/client';
 import { storeInitialToken } from './auth/wiki-token';
 import { startFeishuWS } from './feishu-im/ws-client';
+import { init as initOrchestrator, dispatchNode } from './core/orchestrator';
+import { registry } from './core/registry';
+import { dispatcher } from './core/dispatcher';
+import { isAdmin } from './core/permission';
 import axios from 'axios';
 
 const FEISHU_APP_ID = feishuApp.appId;
@@ -283,6 +287,54 @@ app.post('/auth/exchange', async (req, res) => {
 
 // ==================== 启动 ====================
 
+// ==================== Agent 管理 API ====================
+
+app.get('/api/agents', (_req, res) => {
+  res.json({ count: registry.count, agents: registry.getAll().map((a: { id: string; name: string; node: string; department: string; enabled: boolean }) => ({ id: a.id, name: a.name, node: a.node, department: a.department, enabled: a.enabled })) });
+});
+
+app.get('/api/agents/nodes', (_req, res) => {
+  res.json({ nodes: dispatcher.getRegisteredNodes() });
+});
+
+app.post('/api/agents/register', express.json(), (req, res) => {
+  try {
+    const { config, adminId } = req.body;
+    if (!isAdmin(adminId)) { res.status(403).json({ error: '仅管理员可新增智能体' }); return; }
+    registry.register(config);
+    dispatcher.rebuild();
+    res.json({ ok: true, msg: `智能体「${config.name}」已注册` });
+  } catch (e: unknown) { res.status(400).json({ error: (e as Error).message }); }
+});
+
+app.post('/api/agents/unregister', express.json(), (req, res) => {
+  try {
+    const { id, adminId } = req.body;
+    if (!isAdmin(adminId)) { res.status(403).json({ error: '仅管理员可删除智能体' }); return; }
+    registry.unregister(id);
+    dispatcher.rebuild();
+    res.json({ ok: true, msg: '已删除' });
+  } catch (e: unknown) { res.status(400).json({ error: (e as Error).message }); }
+});
+
+// ==================== Webhook：飞书项目事件 → Agent 调度 ====================
+
+app.post('/webhook/project', async (req, res) => {
+  res.json({ code: 0, msg: 'received' });
+  try {
+    const { work_item_id, node_name, work_item_name } = req.body;
+    if (!work_item_id || !node_name) return;
+    console.log(`[Webhook] ${node_name} → ${work_item_id}`);
+
+    await dispatchNode(node_name, {
+      workItemId: String(work_item_id),
+      workItemName: work_item_name || '',
+      nodeName: node_name,
+      fields: req.body.fields || {},
+    });
+  } catch (e) { console.error('[Webhook] error:', e); }
+});
+
 // ==================== 飞书 IM WebSocket 自动触发 ====================
 
 async function handleIMTrigger(workItemName: string, senderOpenId: string) {
@@ -363,8 +415,11 @@ app.listen(PORT, () => {
   console.log('╚══════════════════════════════════════════╝');
   console.log('');
 
-  // 启动飞书 IM WebSocket（独立运行，不依赖 Claude Code）
+  // 启动飞书 IM WebSocket（独立运行）
   startFeishuWS();
+
+  // 启动多智能体编排引擎
+  initOrchestrator();
 
   if (!projectConfig.userKey) {
     console.log('⚠ 缺少 user_key，请先获取：');
