@@ -7,6 +7,7 @@ import { projectConfig, feishuApp } from './config';
 import { testConnection, exchangeCodeForUserKey, getWorkItemTypes } from './feishu-project/client';
 import { storeInitialToken } from './auth/wiki-token';
 import { startFeishuWS } from './feishu-im/ws-client';
+import { popPending } from './utils/pending-analysis';
 import { init as initOrchestrator, dispatchNode } from './core/orchestrator';
 import { registry } from './core/registry';
 import { dispatcher } from './core/dispatcher';
@@ -161,31 +162,37 @@ app.get('/auth/callback', async (req, res) => {
     return;
   }
   try {
-    // 用 code 换取 user_access_token（飞书 OAuth v1 接口）
-    const tokenRes = await axios.post(
-      'https://open.feishu.cn/open-apis/authen/v1/access_token',
-      {
-        app_id: FEISHU_APP_ID,
-        app_secret: FEISHU_APP_SECRET,
-        grant_type: 'authorization_code',
-        code: code as string,
-      }
+    // Step 1: 获取 app_access_token
+    const appTokenRes = await axios.post(
+      'https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal',
+      { app_id: FEISHU_APP_ID, app_secret: FEISHU_APP_SECRET }
     );
+    const appToken = appTokenRes.data.app_access_token as string;
+    if (!appToken) throw new Error('获取 app_access_token 失败');
 
-    if (tokenRes.data.code !== 0) {
-      throw new Error(tokenRes.data.msg || '换取 token 失败');
-    }
+    // Step 2: 用 app_access_token 换取 user_access_token
+    const tokenRes = await axios.post(
+      'https://open.feishu.cn/open-apis/authen/v1/oidc/access_token',
+      { grant_type: 'authorization_code', code: code as string },
+      { headers: { Authorization: `Bearer ${appToken}` } }
+    );
+    console.log('[OAuth] raw response:', JSON.stringify(tokenRes.data));
 
-    userAccessToken = tokenRes.data.data?.access_token;
-    console.log('[OAuth] ✅ user_access_token 获取成功:', userAccessToken?.substring(0, 15) + '...');
+    const td = tokenRes.data as Record<string, unknown>;
+    if (td.code !== 0) throw new Error((td.msg as string) || '换取 token 失败');
 
-    // 持久化到文件（供 auto-analyzer 读取）
-    const td = tokenRes.data.data || {};
+    const tokenData = td.data as Record<string, unknown>;
+    userAccessToken = tokenData?.access_token as string;
+    if (!userAccessToken) throw new Error('响应中无 access_token: ' + JSON.stringify(td).substring(0, 200));
+
+    console.log('[OAuth] ✅ token:', userAccessToken.substring(0, 15) + '...');
+
+    // 持久化到文件
     storeInitialToken({
-      access_token: td.access_token,
-      refresh_token: td.refresh_token || '',
-      expires_in: td.expires_in || 7200,
-      refresh_expires_in: td.refresh_expires_in || 1209600,
+      access_token: userAccessToken,
+      refresh_token: (tokenData?.refresh_token as string) || '',
+      expires_in: (tokenData?.expires_in as number) || 7200,
+      refresh_expires_in: (tokenData?.refresh_expires_in as number) || 1209600,
     });
 
     // 发飞书消息确认授权成功
@@ -201,7 +208,23 @@ app.get('/auth/callback', async (req, res) => {
         { receive_id: senderOpenId, msg_type: 'text', content: JSON.stringify({ text: '✅ 授权成功！智小协现在可以读取你授权的文档了。有效期14天，到期后需重新授权。' }) },
         { headers: { Authorization: `Bearer ${imToken.data.tenant_access_token}` } }
       ).catch(() => {});
-    }
+
+	    // 检查待处理分析，自动继续
+	    const pending = popPending(senderOpenId);
+	    if (pending) {
+	      const { triggerAnalysis } = await import('./feishu-im/ws-client');
+	      setTimeout(async () => {
+	        try {
+	          const result = await triggerAnalysis(pending.workItemName, pending.chatId, pending.workItemName, senderOpenId);
+	          await axios.post(
+	            'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
+	            { receive_id: senderOpenId, msg_type: 'text', content: JSON.stringify({ text: result }) },
+	            { headers: { Authorization: `Bearer ${imToken.data.tenant_access_token}` } }
+	          ).catch(() => {});
+	        } catch (e) { console.error('[OAuth] 自动继续失败:', e); }
+	      }, 2000);
+	    }
+	  }
 
     res.send(`
       <html><body style="font-family:sans-serif;max-width:500px;margin:60px auto;text-align:center">
@@ -341,6 +364,18 @@ app.post('/api/agents/unregister', express.json(), (req, res) => {
   } catch (e: unknown) { res.status(400).json({ error: (e as Error).message }); }
 });
 
+// ==================== 手动触发：分析需求 ====================
+
+app.post('/trigger/new-requirement/:workItemId', async (req, res) => {
+  const { workItemId } = req.params;
+  console.log('[手动触发] 分析需求:', workItemId);
+  res.json({ code: 0, msg: '分析已启动', workItemId });
+  try {
+    const { handleNewRequirement } = await import('./agents/auto-analyzer');
+    await handleNewRequirement(workItemId);
+  } catch (e) { console.error('[手动触发] 失败:', e); }
+});
+
 // ==================== Webhook：飞书项目事件 → Agent 调度 ====================
 
 app.post('/webhook/project', async (req, res) => {
@@ -439,8 +474,12 @@ app.listen(PORT, () => {
   console.log('╚══════════════════════════════════════════╝');
   console.log('');
 
-  // 启动飞书 IM WebSocket（独立运行）
-  startFeishuWS();
+  // 启动飞书 IM WebSocket（本地开发时如与 claude-feishu 冲突，在 config.env 设 FEISHU_WS_ENABLED=false）
+  if (process.env.FEISHU_WS_ENABLED !== 'false') {
+    startFeishuWS();
+  } else {
+    console.log('⚠ IM WebSocket 已禁用（FEISHU_WS_ENABLED=false），使用 claude-feishu 接收消息');
+  }
 
   // 启动多智能体编排引擎
   initOrchestrator();

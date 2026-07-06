@@ -95,6 +95,7 @@ function formatQuestions(questions: ClarificationQuestions): string {
 export async function analyzePrdForClarification(prdText: string, workItemName: string): Promise<ClarificationQuestions> {
   return analyzePrd(prdText, { name: workItemName }, []);
 }
-export function formatClarificationResult(result: ClarificationQuestions): string {
-  return formatQuestions(result);
+export function formatClarificationResult(result: ClarificationQuestions, prdUrl?: string): string {
+  const header = prdUrl ? `📎 **PRD 文档链接：** ${prdUrl}\n\n---\n\n` : '';
+  return header + formatQuestions(result);
 }

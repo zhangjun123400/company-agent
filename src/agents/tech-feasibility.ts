@@ -70,6 +70,7 @@ function formatReportForComment(report: TechFeasibilityReport): string {
 export async function analyzePrdForTechFeasibility(prdText: string, workItemName: string): Promise<TechFeasibilityReport> {
   return analyzeWithDeepSeek(prdText, { name: workItemName }, '');
 }
-export function formatTechReportResult(report: TechFeasibilityReport): string {
-  return formatReportForComment(report);
+export function formatTechReportResult(report: TechFeasibilityReport, prdUrl?: string): string {
+  const header = prdUrl ? `📎 **PRD 文档链接：** ${prdUrl}\n\n---\n\n` : '';
+  return header + formatReportForComment(report);
 }

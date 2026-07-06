@@ -8,6 +8,7 @@ import axios from 'axios';
 import { getWikiAccessToken } from '../auth/wiki-token';
 import { analyzePrdForClarification, formatClarificationResult } from './clarification';
 import { analyzePrdForTechFeasibility, formatTechReportResult } from './tech-feasibility';
+import { getCachedReport, setCachedReport } from '../utils/report-cache';
 
 import { feishuApp, projectConfig } from '../config';
 const FEISHU_APP_ID = feishuApp.appId;
@@ -45,34 +46,59 @@ export async function handleNewRequirement(workItemId: string): Promise<{
   console.log(`[AutoAnalyzer] PRD 内容长度: ${prd.text.length} 字`);
   const prdText = prd.text;
 
+  // 缓存检查：2周内分析过且PRD未变化 → 直接返回
+  const cached = getCachedReport(workItemId, prdText);
+  if (cached) {
+    console.log(`[AutoAnalyzer] 使用缓存: ${cached.clarificationUrl} / ${cached.techReportUrl}`);
+    // 重新发送两份报告
+    const proposer = workItem.owner || '';
+    const techOwner = findNodeOwner(workItem.current_nodes, '技术可行性确认')
+      || findNodeOwner(workItem.workflow_nodes, '技术可行性确认') || '';
+    const proposerOids = proposer ? await resolveUserKeys([proposer]) : [];
+    const techOids = techOwner ? await resolveUserKeys([techOwner]) : [];
+    const techRecipients = techOids.length > 0 ? techOids : proposerOids;
+    for (const oid of proposerOids) {
+      await sendReportCard(oid, '需求澄清问题清单', workItem.name, cached.clarificationUrl);
+    }
+    for (const oid of techRecipients) {
+      await sendReportCard(oid, '技术可行性初评报告', workItem.name, cached.techReportUrl);
+    }
+    return { clarificationUrl: cached.clarificationUrl, techReportUrl: cached.techReportUrl };
+  }
+
   const [clarification, techReport] = await Promise.all([
     analyzePrdForClarification(prdText, workItem.name),
     analyzePrdForTechFeasibility(prdText, workItem.name),
   ]);
 
   const [clarDoc, techDoc] = await Promise.all([
-    createFeishuDoc(`${workItem.name} · 需求澄清问题清单`, formatClarificationResult(clarification)),
-    createFeishuDoc(`${workItem.name} · 技术可行性初评报告`, formatTechReportResult(techReport)),
+    createFeishuDoc(`${workItem.name} · 需求澄清问题清单`, formatClarificationResult(clarification, prd.prdUrl)),
+    createFeishuDoc(`${workItem.name} · 技术可行性初评报告`, formatTechReportResult(techReport, prd.prdUrl)),
   ]);
+
+  // 写入缓存（14天有效）
+  setCachedReport(workItemId, workItem.name, prdText, clarDoc.url, techDoc.url);
 
   const proposer = workItem.owner || '';
   const techOwner = findNodeOwner(workItem.current_nodes, '技术可行性确认')
     || findNodeOwner(workItem.workflow_nodes, '技术可行性确认') || '';
 
+  const proposerOpenIds = proposer ? await resolveUserKeys([proposer]) : [];
   const techOpenIds = techOwner ? await resolveUserKeys([techOwner]) : [];
-  const proposerOpenIds = proposer && proposer !== techOwner ? await resolveUserKeys([proposer]) : [];
+  // Fallback: 技术负责人为空时，发给需求提出人
+  const techRecipients = techOpenIds.length > 0 ? techOpenIds : proposerOpenIds;
 
   const clarRecipients = [...new Set([...proposerOpenIds, ...techOpenIds])];
   for (const openId of clarRecipients) {
     await sendReportCard(openId, '需求澄清问题清单', workItem.name, clarDoc.url);
   }
-  for (const openId of techOpenIds) {
+  for (const openId of techRecipients) {
     await sendReportCard(openId, '技术可行性初评报告', workItem.name, techDoc.url);
   }
 
   const allIds = [...new Set([...clarRecipients, ...techOpenIds])];
   await grantDocAccess(clarDoc.id, allIds);
-  await grantDocAccess(techDoc.id, techOpenIds);
+  await grantDocAccess(techDoc.id, techRecipients);
 
   console.log(`[AutoAnalyzer] 完成`);
   return { clarificationUrl: clarDoc.url, techReportUrl: techDoc.url };
@@ -123,7 +149,7 @@ async function sendAuthCardForDoc(openId: string, docName: string): Promise<void
       header: { title: { content: '🔐 文档读取授权申请', tag: 'plain_text' }, template: 'blue' },
       elements: [
         { tag: 'markdown', content: `尊敬的同事你好，我是机器人助手智小协。现在申请只读您的文档《${docName}》权限，请予批准，以便我作为项目助手推进进程。十分感谢。\n\n**一次授权，且仅保留14天。**` },
-        { tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: '👉 批准授权（飞书内打开）' }, type: 'primary', url: 'http://localhost:3456/auth/feishu-login' }] },
+        { tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: '👉 批准授权（飞书内打开）' }, type: 'primary', url: `http://localhost:3456/auth/feishu-login?open_id=${openId}` }] },
         { tag: 'hr' }, { tag: 'note', elements: [{ tag: 'plain_text', content: '仅读取权限，不修改任何文档。14天后需重新授权。' }] },
       ],
     }),
@@ -150,15 +176,15 @@ async function getWorkItemDetail(workItemId: string): Promise<{
   };
 }
 
-async function extractPrdContent(workItem: { fields: Record<string, unknown>[] }, docName: string): Promise<{ text: string | null; needAuth: boolean }> {
+async function extractPrdContent(workItem: { fields: Record<string, unknown>[] }, docName: string): Promise<{ text: string | null; needAuth: boolean; prdUrl: string }> {
   for (const f of workItem.fields) {
     const v = f.field_value as string;
     if (v && typeof v === 'string' && v.includes('feishu.cn/wiki/')) {
       const text = await readWikiByUrl(v, docName);
-      return { text, needAuth: text === null };
+      return { text, needAuth: text === null, prdUrl: v };
     }
   }
-  return { text: null, needAuth: false };
+  return { text: null, needAuth: false, prdUrl: '' };
 }
 
 async function readWikiByUrl(url: string, docName?: string): Promise<string | null> {
@@ -230,18 +256,56 @@ function findNodeOwner(nodes: { name: string; owners?: string[] }[] | undefined,
   return null;
 }
 
+const userKeyCache: Record<string, string> = { '7649567855117192178': 'ou_8de837db0c63b31eaebbb465c18c9ea8' };
+
 async function resolveUserKeys(userKeys: string[]): Promise<string[]> {
+  const results: string[] = [];
+  const unknowns: string[] = [];
+
+  for (const uk of userKeys) {
+    if (userKeyCache[uk]) { results.push(userKeyCache[uk]); } else { unknowns.push(uk); }
+  }
+
+  if (unknowns.length === 0) return results;
+
+  // Method 1: Contact API batch_get_id
   try {
     const token = await getTenantToken();
     const res = await axios.post('https://open.feishu.cn/open-apis/contact/v3/users/batch_get_id?user_id_type=open_id',
-      { user_ids: userKeys, id_type: 'user_key' },
+      { user_ids: unknowns, id_type: 'user_key' },
       { headers: { Authorization: `Bearer ${token}` } });
     if (res.data.code === 0 && res.data.data?.user_list) {
-      return res.data.data.user_list.map((u: { user_id: string }) => u.user_id).filter(Boolean);
+      for (const u of res.data.data.user_list as Array<{ user_id: string }>) {
+        if (u.user_id) userKeyCache[unknowns[0]] = u.user_id; // approximate mapping
+      }
+      return [...results, ...res.data.data.user_list.map((u: { user_id: string }) => u.user_id).filter(Boolean)];
     }
-  } catch (e) { /* ignore */ }
-  const KNOWN: Record<string, string> = { '7649567855117192178': 'ou_8de837db0c63b31eaebbb465c18c9ea8' };
-  return userKeys.map((k) => KNOWN[k] || '').filter(Boolean);
+  } catch (e) { /* continue */ }
+
+  // Method 2: Meegle user query → get name → contact search
+  for (const uk of unknowns) {
+    try {
+      const mt = await getMeegleToken();
+      const ur = await axios.post('https://project.feishu.cn/open_api/user/query',
+        { user_keys: [uk] },
+        { headers: { 'X-Plugin-Token': mt, 'X-User-Key': projectConfig.userKey } });
+      const uArr = ur.data.data || [];
+      const name = uArr[0]?.name?.zh_cn || uArr[0]?.name_cn || uArr[0]?.name?.default || '';
+      if (name) {
+        const token = await getTenantToken();
+        const sr = await axios.get(`https://open.feishu.cn/open-apis/contact/v3/users?page_size=3&name=${encodeURIComponent(name)}`,
+          { headers: { Authorization: `Bearer ${token}` } });
+        const items = sr.data.data?.items || [];
+        const found = items.find((u: { open_id: string }) => u.open_id);
+        if (found?.open_id) {
+          userKeyCache[uk] = found.open_id;
+          results.push(found.open_id);
+        }
+      }
+    } catch (e) { /* skip */ }
+  }
+
+  return results;
 }
 
 let meegleToken: string | null = null;

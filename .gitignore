@@ -18,6 +18,7 @@ node_modules/
 # 缓存
 *.cache
 .prd_cache.txt
+output/cache/
 
 # 编译输出
 dist/
