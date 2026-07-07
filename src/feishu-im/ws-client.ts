@@ -16,7 +16,7 @@ const TRIGGER_KW = ['分析', '需求澄清', '技术可行性', '出报告'];
 
 // 待确认队列: 用户 ID → { workItemName, workItemId }
 const pendingConfirms = new Map<string, { name: string; id: string }>();
-const seenMessages = new Set<string>(); // 消息去重
+const _msgTimestamps = new Map<string, number>(); // 消息去重: key → timestamp
 
 let imToken = '';
 async function getImToken(): Promise<string> {
@@ -26,7 +26,16 @@ async function getImToken(): Promise<string> {
   imToken = r.data.tenant_access_token as string;
   return imToken as string;
 }
+// sendIM 发送级去重：同一 chat 2秒内相同文本不重复发送
+const _imSent = new Map<string, number>();
 async function sendIM(chatId: string, text: string): Promise<void> {
+  const key = `${chatId}::${text}`;
+  const last = _imSent.get(key) || 0;
+  if (Date.now() - last < 2000) { console.log('[IM] dedup skip:', text.substring(0, 40)); return; }
+  _imSent.set(key, Date.now());
+  // 清理过期条目
+  if (_imSent.size > 200) { const now = Date.now(); for (const [k, ts] of _imSent) { if (now - ts > 5000) _imSent.delete(k); } }
+
   const token = await getImToken();
   await axios.post('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id',
     { receive_id: chatId, msg_type: 'text', content: JSON.stringify({ text }) },
@@ -98,7 +107,7 @@ export async function triggerAnalysis(workItemName: string, chatId: string, docN
     const items: Array<{ ID: string; name: string }> = sr.data.data || [];
     const found = items.find((i) => i.name && i.name.includes(workItemName));
     if (!found) return `未找到「${workItemName}」相关需求。`;
-    const url = `http://localhost:3456/trigger/new-requirement/${found.ID}?requester=${encodeURIComponent(senderOpenId)}`;
+    const url = `http://localhost:3456/trigger/new-requirement/${found.ID}?requester=${encodeURIComponent(senderOpenId)}&chat_id=${encodeURIComponent(chatId)}`;
     await axios.post(url);
     return `已启动「${found.name}」分析，稍后报告发给你。`;
   } catch (e: unknown) { return `分析出错: ${e instanceof Error ? e.message : String(e)}`; }
@@ -188,15 +197,19 @@ export function startFeishuWS(): void {
     const dispatcher = new Lark.EventDispatcher({}).register({
       'im.message.receive_v1': (data: Record<string, unknown>) => {
         const msg = data.message as Record<string, unknown>;
-        const msgId = (msg.message_id as string) || '';
-        // 消息去重：同一 message_id 已处理过则跳过
-        if (msgId && seenMessages.has(msgId)) return;
-        if (msgId) { seenMessages.add(msgId); if (seenMessages.size > 500) seenMessages.clear(); }
-
         const chatId = (msg.chat_id as string) || '';
         const raw = (msg.content as string) || '';
         const content = (() => { try { return JSON.parse(raw).text || raw; } catch { return raw; } })();
         const senderId = ((data.sender as Record<string, unknown>)?.sender_id as Record<string, string>)?.open_id || '';
+
+        // 消息去重：用 chatId+senderId+content 做 key，3秒窗口。飞书可能推送同一消息多次且 message_id 不同。
+        const dedupKey = `${chatId}:${senderId}:${content}`;
+        const lastSeen = _msgTimestamps.get(dedupKey) || 0;
+        if (Date.now() - lastSeen < 3000) return;
+        _msgTimestamps.set(dedupKey, Date.now());
+        // 清理过期条目
+        if (_msgTimestamps.size > 500) { const now = Date.now(); for (const [k, ts] of _msgTimestamps) { if (now - ts > 5000) _msgTimestamps.delete(k); } }
+
         console.log(`[IM] ${chatId}(${senderId.substring(0,10)}): ${content}`);
 
         // 用户队列：同用户串行，跨用户隔离，不丢消息
@@ -228,9 +241,16 @@ export function startFeishuWS(): void {
               if (pending) names.push(pending.name);
             }
 
+            // 提取不到需求名 → 引导用户明确指定，不要滑到普通聊天
+            if (names.length === 0) {
+              await sendIM(chatId, '🤔 检测到你想做需求分析，但没能识别出需求名称。请直接告诉我需求的全名或关键词，例如「分析 萝卜蹲」。');
+              return;
+            }
+
             if (names.length > 0) {
               const results: string[] = [];
               const triggered = new Set<string>();
+              const asked = new Set<string>(); // 防重复确认
               for (const name of names) {
                 const candidates = await searchRequirements(name);
                 if (candidates.length === 1) {
@@ -241,7 +261,8 @@ export function startFeishuWS(): void {
                       pendingConfirms.delete(senderId);
                       results.push(await triggerAnalysis(candidates[0].name, chatId, candidates[0].name, senderId));
                     }
-                  } else {
+                  } else if (!asked.has(candidates[0].id)) {
+                    asked.add(candidates[0].id);
                     pendingConfirms.set(senderId, { name: candidates[0].name, id: candidates[0].id });
                     results.push(`找到「${candidates[0].name}」，是要分析这个需求吗？回复"是"继续。`);
                   }

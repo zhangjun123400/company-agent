@@ -370,11 +370,12 @@ app.post('/api/agents/unregister', express.json(), (req, res) => {
 app.post('/trigger/new-requirement/:workItemId', async (req, res) => {
   const { workItemId } = req.params;
   const requester = (req.query.requester as string) || '';
-  console.log('[手动触发] 分析需求:', workItemId, requester ? '来自:' + requester : '');
+  const chatId = (req.query.chat_id as string) || '';
+  console.log('[手动触发] 分析需求:', workItemId, requester ? '来自:' + requester : '', chatId ? 'chat:' + chatId : '');
   res.json({ code: 0, msg: '分析已启动', workItemId });
   try {
     const { handleNewRequirement } = await import('./agents/auto-analyzer');
-    await handleNewRequirement(workItemId, requester);
+    await handleNewRequirement(workItemId, requester, chatId);
   } catch (e) { console.error('[手动触发] 失败:', e); }
 });
 
@@ -447,7 +448,7 @@ async function handleIMTrigger(workItemName: string, senderOpenId: string) {
 
   // 触发分析
   const { handleNewRequirement } = await import('./agents/auto-analyzer');
-  const result = await handleNewRequirement(found.ID);
+  const result = await handleNewRequirement(found.ID, senderOpenId);
   if (result.clarificationUrl) {
     await axios.post(
       'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',

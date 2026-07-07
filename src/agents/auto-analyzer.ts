@@ -24,12 +24,25 @@ async function getTenantToken(): Promise<string> {
   return tenantToken as string;
 }
 
+// sendReportCard 发送级去重 Map
+const _reportSent = new Map<string, number>();
+
+// handleNewRequirement 运行中锁：同一 workItemId 同时只允许一个分析
+const _running = new Set<string>();
+
 // ==================== 主入口 ====================
 
-export async function handleNewRequirement(workItemId: string, requester?: string): Promise<{
+export async function handleNewRequirement(workItemId: string, requester?: string, requesterChatId?: string): Promise<{
   clarificationUrl: string; techReportUrl: string;
 }> {
-  console.log(`[AutoAnalyzer] 开始处理: ${workItemId}`, requester ? `申请者: ${requester}` : '');
+  // 防止同一需求被并发分析两次
+  if (_running.has(workItemId)) {
+    console.log(`[AutoAnalyzer] ⚠ 跳过重复请求: ${workItemId}`);
+    return { clarificationUrl: '', techReportUrl: '' };
+  }
+  _running.add(workItemId);
+  try {
+  console.log(`[AutoAnalyzer] 开始处理: ${workItemId}`, requester ? `申请者: ${requester}` : '', requesterChatId ? `chat: ${requesterChatId}` : '');
   const workItem = await getWorkItemDetail(workItemId);
   console.log(`[AutoAnalyzer] 需求名称: ${workItem.name}`);
 
@@ -59,11 +72,29 @@ export async function handleNewRequirement(workItemId: string, requester?: strin
     const proposerOids = proposer ? await resolveUserKeys([proposer]) : [];
     const techOids = techOwner ? await resolveUserKeys([techOwner]) : [];
     const techRecipients = techOids.length > 0 ? techOids : proposerOids;
+
+    const servedClar = new Set<string>(); // 已收到需求澄清
+    const servedTech = new Set<string>(); // 已收到技术报告
+    if (requester) { servedClar.add(requester); servedTech.add(requester); }
+
+    // 1. 触发人 — 优先用 chatId
+    if (requester && requesterChatId) {
+      await sendReportCard(requesterChatId, '需求澄清问题清单', workItem.name, cached.clarificationUrl, 'chat_id');
+      await sendReportCard(requesterChatId, '技术可行性初评报告', workItem.name, cached.techReportUrl, 'chat_id');
+    } else if (requester) {
+      await sendReportCard(requester, '需求澄清问题清单', workItem.name, cached.clarificationUrl);
+      await sendReportCard(requester, '技术可行性初评报告', workItem.name, cached.techReportUrl);
+    }
+    // 2. 需求提出人（需求澄清）+ 技术负责人（技术报告）
     for (const oid of proposerOids) {
-      await sendReportCard(oid, '需求澄清问题清单', workItem.name, cached.clarificationUrl);
+      if (!servedClar.has(oid)) { servedClar.add(oid); await sendReportCard(oid, '需求澄清问题清单', workItem.name, cached.clarificationUrl); }
     }
     for (const oid of techRecipients) {
-      await sendReportCard(oid, '技术可行性初评报告', workItem.name, cached.techReportUrl);
+      if (!servedTech.has(oid)) { servedTech.add(oid); await sendReportCard(oid, '技术可行性初评报告', workItem.name, cached.techReportUrl); }
+    }
+    // 3. 技术负责人也发需求澄清
+    for (const oid of techOids) {
+      if (!servedClar.has(oid)) { servedClar.add(oid); await sendReportCard(oid, '需求澄清问题清单', workItem.name, cached.clarificationUrl); }
     }
     // 缓存命中时也给所有相关人员加权限
     const token = await getTenantToken();
@@ -124,17 +155,36 @@ export async function handleNewRequirement(workItemId: string, requester?: strin
     }
   }
 
-  const clarRecipients = [...new Set([...proposerOpenIds, ...techOpenIds, requester || ''].filter(Boolean))];
-  for (const openId of clarRecipients) {
-    await sendReportCard(openId, '需求澄清问题清单', workItem.name, clarDoc.url);
+  // === 发送报告卡片 ===
+  const servedClar = new Set<string>(); // 已收到需求澄清
+  const servedTech = new Set<string>(); // 已收到技术报告
+  if (requester) { servedClar.add(requester); servedTech.add(requester); }
+
+  // 1. 触发人 — 优先用 chatId 往聊天窗口直接发
+  if (requester && requesterChatId) {
+    await sendReportCard(requesterChatId, '需求澄清问题清单', workItem.name, clarDoc.url, 'chat_id');
+    await sendReportCard(requesterChatId, '技术可行性初评报告', workItem.name, techDoc.url, 'chat_id');
+  } else if (requester) {
+    await sendReportCard(requester, '需求澄清问题清单', workItem.name, clarDoc.url);
+    await sendReportCard(requester, '技术可行性初评报告', workItem.name, techDoc.url);
   }
-  const techNotifyList = [...new Set([...techRecipients, requester || ''].filter(Boolean))];
-  for (const openId of techNotifyList) {
-    await sendReportCard(openId, '技术可行性初评报告', workItem.name, techDoc.url);
+  // 2. 需求提出人（需求澄清）+ 技术负责人（技术报告）
+  for (const oid of proposerOpenIds) {
+    if (!servedClar.has(oid)) { servedClar.add(oid); await sendReportCard(oid, '需求澄清问题清单', workItem.name, clarDoc.url); }
+  }
+  for (const oid of techRecipients) {
+    if (!servedTech.has(oid)) { servedTech.add(oid); await sendReportCard(oid, '技术可行性初评报告', workItem.name, techDoc.url); }
+  }
+  // 3. 技术负责人也发一份需求澄清
+  for (const oid of techOpenIds) {
+    if (!servedClar.has(oid)) { servedClar.add(oid); await sendReportCard(oid, '需求澄清问题清单', workItem.name, clarDoc.url); }
   }
 
   console.log(`[AutoAnalyzer] 完成`);
   return { clarificationUrl: clarDoc.url, techReportUrl: techDoc.url };
+  } finally {
+    _running.delete(workItemId);
+  }
 }
 
 // ==================== 每日轮询 ====================
@@ -276,17 +326,47 @@ async function readTemplateText(wikiToken: string): Promise<string> {
   } catch { return ''; }
 }
 
-async function sendReportCard(openId: string, reportType: string, workItemName: string, docUrl: string): Promise<void> {
-  const token = await getTenantToken();
-  await axios.post(`https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id`, {
-    receive_id: openId, msg_type: 'interactive',
-    content: JSON.stringify({
-      config: { wide_screen_mode: true },
-      header: { title: { content: `📄 ${reportType}`, tag: 'plain_text' }, template: 'blue' },
-      elements: [{ tag: 'markdown', content: `**${workItemName}** 的${reportType}已生成。\n\n👉 [点击查看](${docUrl})` },
-        { tag: 'hr' }, { tag: 'note', elements: [{ tag: 'plain_text', content: '🤖 智小协自动生成' }] }],
-    }),
-  }, { headers: { Authorization: `Bearer ${token}` } });
+async function sendReportCard(
+  targetId: string,
+  reportType: string,
+  workItemName: string,
+  docUrl: string,
+  receiveIdType: 'open_id' | 'chat_id' = 'open_id',
+): Promise<void> {
+  // 发送级去重：同一目标 + 同一报告类型 + 同一文档URL，5秒内不重复发
+  const dedupKey = `${receiveIdType}:${targetId}:${reportType}:${docUrl}`;
+  const lastSent = _reportSent.get(dedupKey) || 0;
+  if (Date.now() - lastSent < 5000) { console.log('[sendReportCard] dedup skip:', reportType, targetId.substring(0, 15)); return; }
+  _reportSent.set(dedupKey, Date.now());
+  if (_reportSent.size > 200) { const now = Date.now(); for (const [k, ts] of _reportSent) { if (now - ts > 10000) _reportSent.delete(k); } }
+
+  try {
+    const token = await getTenantToken();
+    const res = await axios.post(
+      `https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=${receiveIdType}`,
+      {
+        receive_id: targetId,
+        msg_type: 'interactive',
+        content: JSON.stringify({
+          config: { wide_screen_mode: true },
+          header: { title: { content: `📄 ${reportType}`, tag: 'plain_text' }, template: 'blue' },
+          elements: [
+            { tag: 'markdown', content: `**${workItemName}** 的${reportType}已生成。\n\n👉 [点击查看](${docUrl})` },
+            { tag: 'hr' },
+            { tag: 'note', elements: [{ tag: 'plain_text', content: '🤖 智小协自动生成' }] },
+          ],
+        }),
+      },
+      { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 },
+    );
+    if (res.data?.code !== 0) {
+      console.error(`[sendReportCard] API返回错误 [${receiveIdType}=${targetId}]: code=${res.data?.code} msg=${res.data?.msg}`);
+    } else {
+      console.log(`[sendReportCard] ✅ ${reportType} → ${receiveIdType}=${targetId}`);
+    }
+  } catch (e: unknown) {
+    console.error(`[sendReportCard] 发送失败 [${receiveIdType}=${targetId}]: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 async function grantDocAccess(docId: string, openIds: string[]): Promise<void> {
