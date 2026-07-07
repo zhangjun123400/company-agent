@@ -1,6 +1,6 @@
 {
   "agents": [
-    "需求分析.json",
-    "技术可行性初评.json"
+    "需求分析/agent.json",
+    "技术可行性初评/agent.json"
   ]
 }

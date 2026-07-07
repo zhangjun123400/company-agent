@@ -8,6 +8,7 @@ import { testConnection, exchangeCodeForUserKey, getWorkItemTypes } from './feis
 import { storeInitialToken } from './auth/wiki-token';
 import { startFeishuWS } from './feishu-im/ws-client';
 import { popPending } from './utils/pending-analysis';
+import { cleanupOldFiles } from './utils/cleanup';
 import { init as initOrchestrator, dispatchNode } from './core/orchestrator';
 import { registry } from './core/registry';
 import { dispatcher } from './core/dispatcher';
@@ -368,11 +369,12 @@ app.post('/api/agents/unregister', express.json(), (req, res) => {
 
 app.post('/trigger/new-requirement/:workItemId', async (req, res) => {
   const { workItemId } = req.params;
-  console.log('[手动触发] 分析需求:', workItemId);
+  const requester = (req.query.requester as string) || '';
+  console.log('[手动触发] 分析需求:', workItemId, requester ? '来自:' + requester : '');
   res.json({ code: 0, msg: '分析已启动', workItemId });
   try {
     const { handleNewRequirement } = await import('./agents/auto-analyzer');
-    await handleNewRequirement(workItemId);
+    await handleNewRequirement(workItemId, requester);
   } catch (e) { console.error('[手动触发] 失败:', e); }
 });
 
@@ -483,6 +485,10 @@ app.listen(PORT, () => {
 
   // 启动多智能体编排引擎
   initOrchestrator();
+
+  // 清理旧 MD 文件（7天前）+ 每天执行
+  cleanupOldFiles();
+  setInterval(cleanupOldFiles, 24 * 60 * 60 * 1000);
 
   // 检查 Wiki Token
   const { hasWikiToken } = require('./auth/wiki-token');

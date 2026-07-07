@@ -16,20 +16,23 @@ async function agentExecutor(agent: AgentConfig, ctx: ExecutionContext): Promise
     // 执行需求澄清分析
     const { analyzePrdForClarification, formatClarificationResult } = await import('../agents/clarification');
     const result = await analyzePrdForClarification(ctx.prdContent || '', ctx.workItemName);
-    return formatClarificationResult(result);
+    return formatClarificationResult(result, `${ctx.workItemName} · 需求澄清问题清单`, '') || result;
   }
 
   if (desc.includes('技术可行性') || desc.includes('可行性分析') || agent.skills.includes('技术可行性分析')) {
     // 执行技术可行性分析
     const { analyzePrdForTechFeasibility, formatTechReportResult } = await import('../agents/tech-feasibility');
     const result = await analyzePrdForTechFeasibility(ctx.prdContent || '', ctx.workItemName);
-    return formatTechReportResult(result);
+    return formatTechReportResult(result, `${ctx.workItemName} · 技术可行性初评报告`, '');
   }
 
-  // 默认：通用分析（使用 Agent 自定义 prompt + skills）
+  // 默认：通用分析（从 prompt.md 加载，fallback agent.description）
   const { aiComplete } = await import('../utils/ai-client');
+  const fs = await import('fs'); const path = await import('path');
+  const promptFile = path.resolve(__dirname, '../../agents', agent.name, 'prompt.md');
+  const systemPrompt = (fs.existsSync(promptFile) ? fs.readFileSync(promptFile, 'utf8') : '') || agent.prompt || agent.description || '';
   return aiComplete({
-    system: agent.prompt || agent.description,
+    system: systemPrompt,
     messages: [{
       role: 'user',
       content: `【任务】${agent.description}\n【技能】${(agent.skills || []).join('、')}\n【上下文】${JSON.stringify(ctx)}`,

@@ -19,8 +19,8 @@ export async function aiComplete(opts: AiCompletionOptions): Promise<string> {
   messages.push(...opts.messages.map((m) => ({ role: m.role, content: m.content })));
 
   const res = await axios.post(`${DEEPSEEK_BASE}/v1/chat/completions`, {
-    model: 'deepseek-chat', messages,
-    max_tokens: opts.maxTokens || 6000, temperature: opts.temperature ?? 0.3,
+    model: 'deepseek-v4-pro', messages,
+    max_tokens: opts.maxTokens || 16000, temperature: opts.temperature ?? 0.3,
   }, {
     headers: { Authorization: `Bearer ${DEEPSEEK_KEY}`, 'Content-Type': 'application/json' },
     timeout: 120000,

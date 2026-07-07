@@ -9,6 +9,7 @@ import { getWikiAccessToken } from '../auth/wiki-token';
 import { analyzePrdForClarification, formatClarificationResult } from './clarification';
 import { analyzePrdForTechFeasibility, formatTechReportResult } from './tech-feasibility';
 import { getCachedReport, setCachedReport } from '../utils/report-cache';
+import { createFormattedDoc } from '../skills/feishu-doc-formatter';
 
 import { feishuApp, projectConfig } from '../config';
 const FEISHU_APP_ID = feishuApp.appId;
@@ -25,19 +26,20 @@ async function getTenantToken(): Promise<string> {
 
 // ==================== 主入口 ====================
 
-export async function handleNewRequirement(workItemId: string): Promise<{
+export async function handleNewRequirement(workItemId: string, requester?: string): Promise<{
   clarificationUrl: string; techReportUrl: string;
 }> {
-  console.log(`[AutoAnalyzer] 开始处理: ${workItemId}`);
+  console.log(`[AutoAnalyzer] 开始处理: ${workItemId}`, requester ? `申请者: ${requester}` : '');
   const workItem = await getWorkItemDetail(workItemId);
   console.log(`[AutoAnalyzer] 需求名称: ${workItem.name}`);
 
   const prd = await extractPrdContent(workItem, workItem.name);
   if (prd.needAuth) {
     console.log(`[AutoAnalyzer] ⚠ "${workItem.name}" 的 PRD 需要授权`);
-    // 发授权卡片给需求提出人
-    const ownerOpenIds = workItem.owner ? await resolveUserKeys([workItem.owner]) : [];
-    for (const oid of ownerOpenIds) {
+    // 优先发给触发分析的人，其次发给需求提出人
+    const ownerOids = workItem.owner ? await resolveUserKeys([workItem.owner]) : [];
+    const targets = requester ? [requester, ...ownerOids.filter(o => o !== requester)] : ownerOids;
+    for (const oid of targets) {
       await sendAuthCardForDoc(oid, workItem.name);
     }
     return { clarificationUrl: '', techReportUrl: '' };
@@ -63,17 +65,35 @@ export async function handleNewRequirement(workItemId: string): Promise<{
     for (const oid of techRecipients) {
       await sendReportCard(oid, '技术可行性初评报告', workItem.name, cached.techReportUrl);
     }
+    // 缓存命中时也给所有相关人员加权限
+    const token = await getTenantToken();
+    const allRecipients = [...new Set([...proposerOids, ...techRecipients, requester].filter(Boolean))];
+    for (const url of [cached.clarificationUrl, cached.techReportUrl]) {
+      const match = url.match(/\/file\/([A-Za-z0-9]+)/);
+      if (match) {
+        for (const oid of allRecipients) {
+          await axios.post(
+            `https://open.feishu.cn/open-apis/drive/v1/permissions/${match[1]}/members?type=file`,
+            { member_type: 'openid', member_id: oid, perm: 'full_access' },
+            { headers: { Authorization: `Bearer ${token}` } }
+          ).catch(() => {});
+        }
+      }
+    }
     return { clarificationUrl: cached.clarificationUrl, techReportUrl: cached.techReportUrl };
   }
 
-  const [clarification, techReport] = await Promise.all([
+  const [clarContentRaw, techContentRaw] = await Promise.all([
     analyzePrdForClarification(prdText, workItem.name),
     analyzePrdForTechFeasibility(prdText, workItem.name),
   ]);
 
+  const clarContent = formatClarificationResult(clarContentRaw, `${workItem.name} · 需求澄清问题清单`, prd.prdUrl);
+  const techContent = formatTechReportResult(techContentRaw, `${workItem.name} · 技术可行性初评报告`, prd.prdUrl);
+
   const [clarDoc, techDoc] = await Promise.all([
-    createFeishuDoc(`${workItem.name} · 需求澄清问题清单`, formatClarificationResult(clarification, prd.prdUrl)),
-    createFeishuDoc(`${workItem.name} · 技术可行性初评报告`, formatTechReportResult(techReport, prd.prdUrl)),
+    createFormattedDoc(`${workItem.name} · 需求澄清问题清单`, clarContent),
+    createFormattedDoc(`${workItem.name} · 技术可行性初评报告`, techContent),
   ]);
 
   // 写入缓存（14天有效）
@@ -88,17 +108,30 @@ export async function handleNewRequirement(workItemId: string): Promise<{
   // Fallback: 技术负责人为空时，发给需求提出人
   const techRecipients = techOpenIds.length > 0 ? techOpenIds : proposerOpenIds;
 
-  const clarRecipients = [...new Set([...proposerOpenIds, ...techOpenIds])];
+  // 给所有相关人员加文件权限
+  const token = await getTenantToken();
+  const allRecipients = [...new Set([...proposerOpenIds, ...techRecipients, requester].filter(Boolean))];
+  for (const url of [clarDoc.url, techDoc.url]) {
+    const match = url.match(/\/file\/([A-Za-z0-9]+)/);
+    if (match) {
+      for (const oid of allRecipients) {
+        await axios.post(
+          `https://open.feishu.cn/open-apis/drive/v1/permissions/${match[1]}/members?type=file`,
+          { member_type: 'openid', member_id: oid, perm: 'full_access' },
+          { headers: { Authorization: `Bearer ${token}` } }
+        ).catch(() => {});
+      }
+    }
+  }
+
+  const clarRecipients = [...new Set([...proposerOpenIds, ...techOpenIds, requester || ''].filter(Boolean))];
   for (const openId of clarRecipients) {
     await sendReportCard(openId, '需求澄清问题清单', workItem.name, clarDoc.url);
   }
-  for (const openId of techRecipients) {
+  const techNotifyList = [...new Set([...techRecipients, requester || ''].filter(Boolean))];
+  for (const openId of techNotifyList) {
     await sendReportCard(openId, '技术可行性初评报告', workItem.name, techDoc.url);
   }
-
-  const allIds = [...new Set([...clarRecipients, ...techOpenIds])];
-  await grantDocAccess(clarDoc.id, allIds);
-  await grantDocAccess(techDoc.id, techRecipients);
 
   console.log(`[AutoAnalyzer] 完成`);
   return { clarificationUrl: clarDoc.url, techReportUrl: techDoc.url };
@@ -201,31 +234,46 @@ async function readWikiByUrl(url: string, docName?: string): Promise<string | nu
       { headers: { Authorization: `Bearer ${token}` } });
     const docId = nodeRes.data.data?.node?.obj_token || nodeRes.data.data?.node_token;
     if (!docId) return null;
-    const docRes = await axios.get(`https://open.feishu.cn/open-apis/docx/v1/documents/${docId}/blocks?page_size=500`,
+
+    // 优先用 raw_content（直接返回纯文本，处理所有文档类型）
+    const rawRes = await axios.get(`https://open.feishu.cn/open-apis/docx/v1/documents/${docId}/raw_content`,
       { headers: { Authorization: `Bearer ${token}` } });
-    const items = docRes.data.data?.items || [];
-    return items.map((item: Record<string, unknown>) => {
-      const text = item.text as Record<string, unknown> | undefined;
-      return ((text?.elements as Array<Record<string, unknown>>) || [])
-        .map((e: Record<string, unknown>) => { const run = e.text_run as Record<string, unknown> | undefined; return (run?.content as string) || ''; }).join('');
-    }).join('\n');
+    const rawContent = rawRes.data.data?.content || '';
+
+    // Fallback: blocks API（处理 raw_content 不支持的旧文档）
+    if (!rawContent.trim()) {
+      const blockRes = await axios.get(`https://open.feishu.cn/open-apis/docx/v1/documents/${docId}/blocks?page_size=500`,
+        { headers: { Authorization: `Bearer ${token}` } });
+      const items = blockRes.data.data?.items || [];
+      return items.map((item: Record<string, unknown>) => {
+        const text = item.text as Record<string, unknown> | undefined;
+        return ((text?.elements as Array<Record<string, unknown>>) || [])
+          .map((e: Record<string, unknown>) => { const run = e.text_run as Record<string, unknown> | undefined; return (run?.content as string) || ''; }).join('');
+      }).join('\n');
+    }
+    return rawContent;
   } catch (error) { console.error('[AutoAnalyzer] 读取 Wiki 失败:', error); return null; }
 }
 
-async function createFeishuDoc(title: string, content: string): Promise<{ id: string; url: string }> {
-  const token = await getTenantToken();
-  const H = { Authorization: `Bearer ${token}` };
-  const create = await axios.post('https://open.feishu.cn/open-apis/docx/v1/documents', { title }, { headers: H });
-  const docId: string = create.data.data.document.document_id;
-  const paragraphs = content.split('\n').filter((p) => p.trim());
-  const blocks = paragraphs.map((p) => ({
-    block_type: 2, text: { elements: [{ text_run: { content: p.substring(0, 400) } }] },
-  }));
-  for (let i = 0; i < blocks.length; i += 45) {
-    await axios.post(`https://open.feishu.cn/open-apis/docx/v1/documents/${docId}/blocks/${docId}/children`,
-      { children: blocks.slice(i, i + 45) }, { headers: H });
-  }
-  return { id: docId, url: `https://p1iscu6mj28.feishu.cn/docx/${docId}` };
+// 飞书文档模板 token（对应 agents/ 下的 Agent），仅作格式参考
+const TEMPLATE_WIKI_TOKENS: Record<string, string> = {
+  '需求分析': 'YThPwbt5ziWdKokj1GNcNMGWndg',
+  '技术可行性初评': 'Jelnw8e69idtBrkgTvlcDhfXnih',
+};
+
+/** 读取飞书模板的纯文本内容（用作 AI 格式参考） */
+async function readTemplateText(wikiToken: string): Promise<string> {
+  try {
+    const t = await getWikiAccessToken();
+    if (!t) return '';
+    const nr = await axios.get(`https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node?token=${wikiToken}`,
+      { headers: { Authorization: `Bearer ${t}` } });
+    const docId = nr.data.data?.node?.obj_token;
+    if (!docId) return '';
+    const rr = await axios.get(`https://open.feishu.cn/open-apis/docx/v1/documents/${docId}/raw_content`,
+      { headers: { Authorization: `Bearer ${t}` } });
+    return rr.data.data?.content || '';
+  } catch { return ''; }
 }
 
 async function sendReportCard(openId: string, reportType: string, workItemName: string, docUrl: string): Promise<void> {

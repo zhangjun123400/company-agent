@@ -15,7 +15,7 @@ export interface AgentConfig {
   node: string;
   description: string;
   /** 系统提示词 — 定义智能体的身份、能力、行为规则 */
-  prompt: string;
+  prompt?: string;
   /** 技能列表 — 可自行新增，每项是自然语言描述的能力 */
   skills: string[];
   tools: string[];

@@ -14,6 +14,10 @@ import { enqueue } from '../utils/user-queue';
 const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY || '';
 const TRIGGER_KW = ['分析', '需求澄清', '技术可行性', '出报告'];
 
+// 待确认队列: 用户 ID → { workItemName, workItemId }
+const pendingConfirms = new Map<string, { name: string; id: string }>();
+const seenMessages = new Set<string>(); // 消息去重
+
 let imToken = '';
 async function getImToken(): Promise<string> {
   if (imToken) return imToken;
@@ -40,45 +44,42 @@ async function chatReply(msg: string): Promise<string> {
 }
 
 /** 从消息中提取所有需求名称（支持多需求） */
-function extractNames(text: string): string[] {
-  // 先去掉"分析""输出"等前缀词
-  const cleaned = text.replace(/帮我|请|一下|把|的/g, '');
-  // 按分隔词拆分
-  const parts = cleaned.split(/[和、与及以及还有,，]+/);
-  const names: string[] = [];
-  for (const part of parts) {
-    // 提取需求名关键词
-    const m = part.match(/(?:分析|输出|出)?[「《]?(.{2,20}?)[」》]?(?:需求|的|项目|游戏|地图)?\s*(?:分析|报告|清单|澄清|可行性)?$/);
-    if (m && m[1] && m[1].length >= 2) {
-      names.push(m[1].trim());
-    } else {
-      // fallback: 取整段的关键部分
-      const w = part.replace(/分析|输出|报告|清单|澄清|可行性|需求/g, '').trim();
-      if (w.length >= 2 && w.length <= 20) names.push(w);
-    }
+async function extractNames(text: string): Promise<string[]> {
+  // 用 DeepSeek 理解用户意图，提取需求名称
+  try {
+    const r = await axios.post('https://api.deepseek.com/v1/chat/completions', {
+      model: 'deepseek-v4-pro', max_tokens: 100, temperature: 0,
+      messages: [{
+        role: 'system',
+        content: '从用户消息中提取需求名称（仅名称，不要修饰词）。只输出JSON数组，如["萝卜蹲"]。不要包含"技术""可行性""游戏""的""分析"等词。没有明确名称时输出[]。',
+      }, { role: 'user', content: text }],
+    }, { headers: { Authorization: `Bearer ${DEEPSEEK_KEY}`, 'Content-Type': 'application/json' }, timeout: 10000 });
+    const json = r.data.choices[0].message.content.replace(/```json|```/g, '').trim();
+    const names = JSON.parse(json);
+    return Array.isArray(names) ? names : [];
+  } catch {
+    // Fallback: 简单规则
+    return text.replace(/分析|一下|的|需求|技术|可行|报告|清单|澄清/g, '').trim().split(/[、,，和与及]/).filter((n: string) => n.length >= 2);
   }
-  // 如果没提取到，尝试全局匹配
-  if (names.length === 0) {
-    const gm = text.match(/(?:分析|出)(.{2,20}?)(?:需求|游戏|项目|地图|的|分析|报告)/g);
-    if (gm) {
-      for (const g of gm) {
-        const nm = g.replace(/分析|出|需求|游戏|项目|地图|的|报告/g, '').trim();
-        if (nm.length >= 2) names.push(nm);
-      }
-    }
-  }
-  return [...new Set(names)]; // 去重
 }
 
 /** 模糊搜索需求，返回候选列表 */
 async function searchRequirements(keyword: string): Promise<Array<{ id: string; name: string }>> {
-  const pt = await axios.post('https://project.feishu.cn/open_api/authen/plugin_token',
-    { plugin_id: projectConfig.pluginId, plugin_secret: projectConfig.pluginSecret, type: 1 });
-  const pToken = pt.data.data.token;
-  const sr = await axios.post('https://project.feishu.cn/open_api/compositive_search',
-    { query_type: 'workitem', query: keyword, page_size: 5 },
-    { headers: { 'X-Plugin-Token': pToken, 'X-User-Key': projectConfig.userKey } });
-  return ((sr.data.data || []) as Array<{ ID: string; name: string }>).map(i => ({ id: i.ID, name: i.name }));
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const pt = await axios.post('https://project.feishu.cn/open_api/authen/plugin_token',
+        { plugin_id: projectConfig.pluginId, plugin_secret: projectConfig.pluginSecret, type: 1 });
+      const pToken = pt.data.data.token;
+      const sr = await axios.post('https://project.feishu.cn/open_api/compositive_search',
+        { query_type: 'workitem', query: keyword, page_size: 5 },
+        { headers: { 'X-Plugin-Token': pToken, 'X-User-Key': projectConfig.userKey } });
+      return ((sr.data.data || []) as Array<{ ID: string; name: string }>).map(i => ({ id: i.ID, name: i.name }));
+    } catch (e) {
+      if (attempt === 1) { console.error('[IM] 搜索失败:', e); return []; }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+  return [];
 }
 
 export async function triggerAnalysis(workItemName: string, chatId: string, docName: string, senderOpenId: string): Promise<string> {
@@ -97,7 +98,8 @@ export async function triggerAnalysis(workItemName: string, chatId: string, docN
     const items: Array<{ ID: string; name: string }> = sr.data.data || [];
     const found = items.find((i) => i.name && i.name.includes(workItemName));
     if (!found) return `未找到「${workItemName}」相关需求。`;
-    await axios.post(`http://localhost:3456/trigger/new-requirement/${found.ID}`);
+    const url = `http://localhost:3456/trigger/new-requirement/${found.ID}?requester=${encodeURIComponent(senderOpenId)}`;
+    await axios.post(url);
     return `已启动「${found.name}」分析，稍后报告发给你。`;
   } catch (e: unknown) { return `分析出错: ${e instanceof Error ? e.message : String(e)}`; }
 }
@@ -186,6 +188,11 @@ export function startFeishuWS(): void {
     const dispatcher = new Lark.EventDispatcher({}).register({
       'im.message.receive_v1': (data: Record<string, unknown>) => {
         const msg = data.message as Record<string, unknown>;
+        const msgId = (msg.message_id as string) || '';
+        // 消息去重：同一 message_id 已处理过则跳过
+        if (msgId && seenMessages.has(msgId)) return;
+        if (msgId) { seenMessages.add(msgId); if (seenMessages.size > 500) seenMessages.clear(); }
+
         const chatId = (msg.chat_id as string) || '';
         const raw = (msg.content as string) || '';
         const content = (() => { try { return JSON.parse(raw).text || raw; } catch { return raw; } })();
@@ -194,28 +201,54 @@ export function startFeishuWS(): void {
 
         // 用户队列：同用户串行，跨用户隔离，不丢消息
         enqueue(senderId, async () => {
+          // 0. 确认待处理的分析请求
+          if (/^(是|对|确认|yes|ok|好|可以|行)/i.test(content.trim())) {
+            const pending = pendingConfirms.get(senderId);
+            if (pending) {
+              pendingConfirms.delete(senderId);
+              const result = await triggerAnalysis(pending.name, chatId, pending.name, senderId);
+              await sendIM(chatId, result);
+              return;
+            }
+          }
+
           // 1. Management commands
           const mgmt = await handleManagement(content, senderId, chatId);
           if (mgmt !== null) { await sendIM(chatId, mgmt); return; }
 
           // 2. Analysis trigger — 支持多需求（自动去重）
           if (TRIGGER_KW.some((kw) => content.includes(kw))) {
-            const names = extractNames(content);
+            console.log('[IM] 分析触发, 提取关键词...');
+            const names = await extractNames(content);
+            console.log('[IM] 提取到', names.length, '个:', names.join(','));
+
+            // 如果 DeepSeek 没提取到需求名但有待确认项，直接用待确认的
+            if (names.length === 0) {
+              const pending = pendingConfirms.get(senderId);
+              if (pending) names.push(pending.name);
+            }
+
             if (names.length > 0) {
               const results: string[] = [];
-              const triggered = new Set<string>(); // 去重：同 ID 不重复触发
+              const triggered = new Set<string>();
               for (const name of names) {
                 const candidates = await searchRequirements(name);
-                if (candidates.length === 1 && candidates[0].name.includes(name)) {
-                  if (!triggered.has(candidates[0].id)) {
-                    triggered.add(candidates[0].id);
-                    results.push(await triggerAnalysis(candidates[0].name, chatId, candidates[0].name, senderId));
+                if (candidates.length === 1) {
+                  const exact = candidates[0].name === name;
+                  if (exact) {
+                    if (!triggered.has(candidates[0].id)) {
+                      triggered.add(candidates[0].id);
+                      pendingConfirms.delete(senderId);
+                      results.push(await triggerAnalysis(candidates[0].name, chatId, candidates[0].name, senderId));
+                    }
+                  } else {
+                    pendingConfirms.set(senderId, { name: candidates[0].name, id: candidates[0].id });
+                    results.push(`找到「${candidates[0].name}」，是要分析这个需求吗？回复"是"继续。`);
                   }
                 } else if (candidates.length > 1) {
-                  const list = candidates.map((c, i) => `${i + 1}. ${c.name}`).join('\n');
-                  results.push(`「${name}」找到多个匹配：\n${list}\n请输入序号确认，或输入全名重新查询。`);
+                  results.push(`「${name}」有 ${candidates.length} 个匹配：\n${candidates.map((c,i)=>`${i+1}. ${c.name}`).join('\n')}\n请回复序号确认。`);
                 } else {
-                  results.push(`未找到与「${name}」匹配的需求。请确认需求名称是否正确。`);
+                  results.push(`未找到与「${name}」匹配的需求。请确认需求名称。`);
                 }
               }
               await sendIM(chatId, results.join('\n\n'));

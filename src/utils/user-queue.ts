@@ -13,6 +13,6 @@ const queues = new Map<string, Promise<void>>();
  */
 export function enqueue(userKey: string, task: Task): void {
   const prev = queues.get(userKey) || Promise.resolve();
-  const next = prev.then(task).catch((e) => console.error(`[Queue] ${userKey}:`, e));
+  const next = prev.then(task).catch((e) => console.error(`[Queue] ${userKey}:`, e instanceof Error ? e.stack || e.message : String(e)));
   queues.set(userKey, next);
 }
