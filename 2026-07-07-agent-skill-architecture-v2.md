@@ -8,8 +8,7 @@
 
 ```
 agents/硬件方案评审/
-  ├─ SKILL.md          # YAML 元信息 + Markdown 正文（系统提示词）
-  └─ _config.json      # 可选：覆盖默认管线/超时/输出目标
+  └─ SKILL.md          # YAML 元信息 + Markdown 正文（系统提示词），一个文件即一个 Agent
 ```
 
 **SKILL.md 格式**（对标 Claude Code skill 标准）：
