@@ -6,37 +6,88 @@
 
 ---
 
+## 0. 核心区分：智能体 ≠ 技能
+
+这是整个架构最重要的概念边界：
+
+```
+技能 (Skill)           →  全局加载一次，提供工具能力
+智能体 (Agent)         →  挂载在飞书项目节点上，声明使用哪些工具
+
+一个技能 = 一组工具（如 drawio-generator 提供 drawio:generate 工具）
+一个智能体 = SKILL.md 配置 + 工具声明（如 "技术架构评审" 使用 ai:analyze + drawio:generate）
+```
+
+| | 技能 (Skill) | 智能体 (Agent) |
+|---|---|---|
+| **定位** | 能力包，全局共用 | 项目节点上的 AI 助手 |
+| **数量** | 少（5~20 个） | 可多（每个节点可配多个） |
+| **加载** | 启动时一次性加载到 toolRegistry | 节点事件触发时才执行 |
+| **配置** | `skills/xxx/SKILL.md` | `agents/xxx/SKILL.md` |
+| **声明** | 我**提供**哪些工具 | 我**使用**哪些工具 |
+| **用户感知** | 开发者/管理员安装 | 用户创建和对话 |
+
+**类比**：技能 = VS Code 扩展，智能体 = 工作区配置。扩展装一次全局可用，每个工作区选自己需要的。
+
+---
+
 ## 1. 目标
 
 让每个智能体可以**外接技能**——像 Claude Code 装 Skill 一样，给智能体装 `drawio-generator` 就能画图，装 `github-issues` 就能建 Issue。新技能即插即用，不改核心代码。
 
 ---
 
-## 2. 核心模型：Skill = 自包含目录
+## 2. 架构总览
 
 ```
-skills/
-  ├─ ai-analyze/              # 内置 Skill（本体能力）
-  │   └─ SKILL.md
-  │
-  ├─ feishu-wiki/             # 内置 Skill（平台能力）
-  │   └─ SKILL.md
-  │
-  ├─ feishu-docx/             # 内置 Skill（平台能力）
-  │   └─ SKILL.md
-  │
-  ├─ feishu-im/               # 内置 Skill（平台能力）
-  │   └─ SKILL.md
-  │
-  ├─ feishu-project/          # 内置 Skill（平台能力）
-  │   └─ SKILL.md
-  │
-  └─ drawio-generator/        # 外部 Skill（用户安装）
-      ├─ SKILL.md             # 声明：我是谁、提供哪些工具、怎么用
-      └─ handler.ts           # 工具实现（可选，简单 Skill 只需 SKILL.md）
+┌──────────────────────────────────────────────────────────┐
+│                    技能层（全局，启动时一次性加载）          │
+│                                                          │
+│  skills/                                                 │
+│    ├─ ai-analyze/SKILL.md      提供: ai:analyze          │
+│    ├─ feishu-wiki/SKILL.md     提供: wiki:read           │
+│    ├─ feishu-docx/SKILL.md     提供: docx:create         │
+│    ├─ feishu-im/SKILL.md       提供: im:send             │
+│    ├─ feishu-project/SKILL.md  提供: project:query/search│
+│    └─ drawio-generator/        提供: drawio:generate ← 外部技能│
+│         ├─ SKILL.md                                      │
+│         └─ handler.ts                                    │
+│                                                          │
+│  SkillLoader.loadAll() → 全部注册到 toolRegistry（单例）   │
+└──────────────────────┬───────────────────────────────────┘
+                       │ 工具已就绪，等待智能体调用
+                       ▼
+┌──────────────────────────────────────────────────────────┐
+│                  智能体层（按节点配置，触发时执行）          │
+│                                                          │
+│  agents/需求评审/                                         │
+│    ├─ 需求分析/SKILL.md        tools: [wiki:read,         │
+│    │                                   ai:analyze,       │
+│    │                                   docx:create,      │
+│    │                                   im:send]          │
+│    └─ 技术可行性初评/SKILL.md  tools: [wiki:read,         │
+│                                        ai:analyze,       │
+│                                        docx:create,      │
+│                                        im:send]          │
+│                                                          │
+│  agents/方案设计/                                         │
+│    └─ 技术架构评审/SKILL.md    tools: [wiki:read,         │
+│                                        ai:analyze,       │
+│                                        drawio:generate,  │ ← 使用了外部技能
+│                                        docx:create]      │
+│                                                          │
+│  每个智能体独立配置，声明自己需要哪些工具                     │
+└──────────────────────┬───────────────────────────────────┘
+                       │ 节点事件触发
+                       ▼
+┌──────────────────────────────────────────────────────────┐
+│                  调度执行层                                │
+│                                                          │
+│  orchestrator.ts                                         │
+│    匹配 node → 加载 Agent SKILL.md → 解析 tools 列表       │
+│    → 从 toolRegistry 取工具 → 模式匹配 → 执行              │
+└──────────────────────────────────────────────────────────┘
 ```
-
-**一个 Skill 目录 = 一个独立能力包。** 提供 1~N 个工具，自描述、可热加载。
 
 ---
 
