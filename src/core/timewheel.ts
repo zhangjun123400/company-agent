@@ -24,7 +24,7 @@ interface ReminderRule {
   timeoutMinutes: number;
   remind: {
     target: string;           // "需求提出者" | "节点负责人"
-    fallbackOpenId: string;   // 备选人 open_id（直接可用）
+    fallbackUserKey: string;  // 备选人 user_key（飞书项目双击头像获取）
   };
   enabled: boolean;
 }
@@ -314,9 +314,9 @@ class TimeWheel {
       if (owners.length > 0) return resolveUserKey(owners[0]);
     }
 
-    // 备选：直接使用配置的 open_id
-    if (rule.remind.fallbackOpenId) {
-      return rule.remind.fallbackOpenId;
+    // 备选：从 user_key 解析（飞书项目双击头像获取）
+    if (rule.remind.fallbackUserKey) {
+      return resolveUserKey(rule.remind.fallbackUserKey);
     }
 
     return null;

@@ -12,7 +12,7 @@
       "timeoutMinutes": 120,
       "remind": {
         "target": "需求提出者",
-        "fallbackOpenId": ""
+        "fallbackUserKey": ""
       },
       "enabled": true
     },
@@ -28,7 +28,7 @@
       "timeoutMinutes": 120,
       "remind": {
         "target": "节点负责人",
-        "fallbackOpenId": "ou_8de837db0c63b31eaebbb465c18c9ea8"
+        "fallbackUserKey": "7649567855117192178"
       },
       "enabled": true
     }
