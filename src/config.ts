@@ -8,7 +8,6 @@ import path from 'path';
 
 // 加载 config/config.env（集中配置）
 dotenv.config({ path: path.resolve(__dirname, '../config/config.env') });
-dotenv.config({ path: path.resolve(__dirname, '../config/.env') }); // 兼容旧文件
 
 function requireEnv(key: string): string {
   const value = process.env[key];
