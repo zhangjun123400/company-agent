@@ -6,10 +6,9 @@ import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
 import { getWikiAccessToken } from '../auth/wiki-token';
-import { analyzePrdForClarification, formatClarificationResult } from './clarification';
-import { analyzePrdForTechFeasibility, formatTechReportResult } from './tech-feasibility';
 import { getCachedReport, setCachedReport } from '../utils/report-cache';
-import { createFormattedDoc } from '../skills/feishu-doc-formatter';
+import { toolRegistry } from '../tools';
+import type { ToolContext } from '../tools/_types';
 
 import { feishuApp, projectConfig } from '../config';
 const FEISHU_APP_ID = feishuApp.appId;
@@ -114,21 +113,31 @@ export async function handleNewRequirement(workItemId: string, requester?: strin
     return { clarificationUrl: cached.clarificationUrl, techReportUrl: cached.techReportUrl };
   }
 
+  const toolCtx: ToolContext = { workItemId, workItemName: workItem.name, nodeName: '', fields: {}, prdContent: prdText };
+
+  // 并行：需求澄清 + 技术可行性分析（各自加载 SKILL.md 提示词）
+  const clarSkillBody = loadAgentSkill('需求分析');
+  const techSkillBody = loadAgentSkill('技术可行性初评');
+
   const [clarContentRaw, techContentRaw] = await Promise.all([
-    analyzePrdForClarification(prdText, workItem.name),
-    analyzePrdForTechFeasibility(prdText, workItem.name),
+    toolRegistry.get('ai:analyze')!.execute({ ...toolCtx, skillBody: clarSkillBody }),
+    toolRegistry.get('ai:analyze')!.execute({ ...toolCtx, skillBody: techSkillBody }),
   ]);
 
-  const clarContent = formatClarificationResult(clarContentRaw, `${workItem.name} · 需求澄清问题清单`, prd.prdUrl);
-  const techContent = formatTechReportResult(techContentRaw, `${workItem.name} · 技术可行性初评报告`, prd.prdUrl);
+  // 格式化标题 & 创建文档
+  const clarFull = `# ${workItem.name} · 需求澄清问题清单\n\n> 📎 PRD：${prd.prdUrl}\n> 🕐 ${new Date().toLocaleString('zh-CN')}\n\n---\n\n${clarContentRaw}`;
+  const techFull = `# ${workItem.name} · 技术可行性初评报告\n\n> 📎 PRD：${prd.prdUrl}\n> 🕐 ${new Date().toLocaleString('zh-CN')}\n\n---\n\n${techContentRaw}`;
 
   const [clarDoc, techDoc] = await Promise.all([
-    createFormattedDoc(`${workItem.name} · 需求澄清问题清单`, clarContent),
-    createFormattedDoc(`${workItem.name} · 技术可行性初评报告`, techContent),
+    toolRegistry.get('docx:create')!.execute({ ...toolCtx, previousOutput: clarFull, workItemName: `${workItem.name} · 需求澄清问题清单` }),
+    toolRegistry.get('docx:create')!.execute({ ...toolCtx, previousOutput: techFull, workItemName: `${workItem.name} · 技术可行性初评报告` }),
   ]);
 
+  const clarDocParsed = { url: clarDoc };
+  const techDocParsed = { url: techDoc };
+
   // 写入缓存（14天有效）
-  setCachedReport(workItemId, workItem.name, prdText, clarDoc.url, techDoc.url);
+  setCachedReport(workItemId, workItem.name, prdText, clarDocParsed.url, techDocParsed.url);
 
   const proposer = workItem.owner || '';
   const techOwner = findNodeOwner(workItem.current_nodes, '技术可行性确认')
@@ -142,7 +151,7 @@ export async function handleNewRequirement(workItemId: string, requester?: strin
   // 给所有相关人员加文件权限
   const token = await getTenantToken();
   const allRecipients = [...new Set([...proposerOpenIds, ...techRecipients, requester].filter(Boolean))];
-  for (const url of [clarDoc.url, techDoc.url]) {
+  for (const url of [clarDocParsed.url, techDocParsed.url]) {
     const match = url.match(/\/file\/([A-Za-z0-9]+)/);
     if (match) {
       for (const oid of allRecipients) {
@@ -162,26 +171,26 @@ export async function handleNewRequirement(workItemId: string, requester?: strin
 
   // 1. 触发人 — 优先用 chatId 往聊天窗口直接发
   if (requester && requesterChatId) {
-    await sendReportCard(requesterChatId, '需求澄清问题清单', workItem.name, clarDoc.url, 'chat_id');
-    await sendReportCard(requesterChatId, '技术可行性初评报告', workItem.name, techDoc.url, 'chat_id');
+    await sendReportCard(requesterChatId, '需求澄清问题清单', workItem.name, clarDocParsed.url, 'chat_id');
+    await sendReportCard(requesterChatId, '技术可行性初评报告', workItem.name, techDocParsed.url, 'chat_id');
   } else if (requester) {
-    await sendReportCard(requester, '需求澄清问题清单', workItem.name, clarDoc.url);
-    await sendReportCard(requester, '技术可行性初评报告', workItem.name, techDoc.url);
+    await sendReportCard(requester, '需求澄清问题清单', workItem.name, clarDocParsed.url);
+    await sendReportCard(requester, '技术可行性初评报告', workItem.name, techDocParsed.url);
   }
   // 2. 需求提出人（需求澄清）+ 技术负责人（技术报告）
   for (const oid of proposerOpenIds) {
-    if (!servedClar.has(oid)) { servedClar.add(oid); await sendReportCard(oid, '需求澄清问题清单', workItem.name, clarDoc.url); }
+    if (!servedClar.has(oid)) { servedClar.add(oid); await sendReportCard(oid, '需求澄清问题清单', workItem.name, clarDocParsed.url); }
   }
   for (const oid of techRecipients) {
-    if (!servedTech.has(oid)) { servedTech.add(oid); await sendReportCard(oid, '技术可行性初评报告', workItem.name, techDoc.url); }
+    if (!servedTech.has(oid)) { servedTech.add(oid); await sendReportCard(oid, '技术可行性初评报告', workItem.name, techDocParsed.url); }
   }
   // 3. 技术负责人也发一份需求澄清
   for (const oid of techOpenIds) {
-    if (!servedClar.has(oid)) { servedClar.add(oid); await sendReportCard(oid, '需求澄清问题清单', workItem.name, clarDoc.url); }
+    if (!servedClar.has(oid)) { servedClar.add(oid); await sendReportCard(oid, '需求澄清问题清单', workItem.name, clarDocParsed.url); }
   }
 
   console.log(`[AutoAnalyzer] 完成`);
-  return { clarificationUrl: clarDoc.url, techReportUrl: techDoc.url };
+  return { clarificationUrl: clarDocParsed.url, techReportUrl: techDocParsed.url };
   } finally {
     _running.delete(workItemId);
   }
@@ -376,6 +385,17 @@ async function grantDocAccess(docId: string, openIds: string[]): Promise<void> {
       { member_type: 'openid', member_id: id, perm: 'full_access' },
       { headers: { Authorization: `Bearer ${token}` } }).catch(() => { /* ignore */ });
   }
+}
+
+/** 加载 Agent 的 SKILL.md 正文（YAML frontmatter 之后的部分） */
+function loadAgentSkill(agentName: string): string {
+  const skillPath = path.resolve(__dirname, '../../agents', agentName, 'SKILL.md');
+  if (fs.existsSync(skillPath)) {
+    const raw = fs.readFileSync(skillPath, 'utf-8');
+    const parts = raw.split(/^---$/m);
+    return parts.length >= 3 ? parts.slice(2).join('---').trim() : raw.trim();
+  }
+  return '';
 }
 
 function findNodeOwner(nodes: { name: string; owners?: string[] }[] | undefined, nodeName: string): string | null {

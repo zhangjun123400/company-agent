@@ -39,13 +39,7 @@ class AgentRegistry {
       for (const file of registry.agents || []) {
         try {
           const fullPath = path.join(AGENTS_DIR, file);
-          let config: AgentConfig;
-
-          if (file.endsWith('.md')) {
-            config = this.parseSkillMd(fullPath);
-          } else {
-            config = JSON.parse(fs.readFileSync(fullPath, 'utf-8')) as AgentConfig;
-          }
+          const config = this.parseSkillMd(fullPath);
 
           if (config.enabled !== false) {
             this.agents.set(config.id, config);
@@ -171,20 +165,15 @@ ${config.description}
     const agent = this.agents.get(id);
     if (!agent) throw new Error(`Agent ${id} 不存在`);
 
-    // 从注册表移除（兼容旧 .json 和新 SKILL.md 路径）
+    // 从注册表移除
     const registry = JSON.parse(fs.readFileSync(REGISTRY_FILE, 'utf-8'));
-    const oldEntry = `${agent.name}.json`;
-    const newEntry = `${agent.name}/SKILL.md`;
-    registry.agents = registry.agents.filter((f: string) => f !== oldEntry && f !== newEntry);
+    const entry = `${agent.name}/SKILL.md`;
+    registry.agents = registry.agents.filter((f: string) => f !== entry);
     fs.writeFileSync(REGISTRY_FILE, JSON.stringify(registry, null, 2), 'utf-8');
 
-    // 删除 Agent 目录或旧文件
+    // 删除 Agent 目录
     const agentDir = path.join(AGENTS_DIR, agent.name);
-    const oldFile = path.join(AGENTS_DIR, `${agent.name}.json`);
-    try {
-      if (fs.existsSync(agentDir)) fs.rmSync(agentDir, { recursive: true });
-      else if (fs.existsSync(oldFile)) fs.unlinkSync(oldFile);
-    } catch { /* ignore */ }
+    try { if (fs.existsSync(agentDir)) fs.rmSync(agentDir, { recursive: true }); } catch { /* ignore */ }
 
     // 内存移除
     this.agents.delete(id);

@@ -67,26 +67,7 @@ async function agentExecutor(agent: AgentConfig, ctx: ExecutionContext): Promise
     return callTool('im:send', toolCtx);
   }
 
-  // ====== 兜底：兼容旧格式 Agent ======
-
-  // 旧 需求分析 兼容
-  const desc = agent.description.toLowerCase();
-  if (desc.includes('需求澄清') || desc.includes('需求分析') || agent.skills.includes('澄清问题生成')) {
-    console.log(`[Orchestrator] ${agent.name} → 旧格式兼容(需求分析)`);
-    const { analyzePrdForClarification, formatClarificationResult } = await import('../agents/clarification');
-    const result = await analyzePrdForClarification(ctx.prdContent || '', ctx.workItemName);
-    return formatClarificationResult(result, `${ctx.workItemName} · 需求澄清问题清单`, '') || result;
-  }
-
-  // 旧 技术可行性初评 兼容
-  if (desc.includes('技术可行性') || desc.includes('可行性分析') || agent.skills.includes('技术可行性分析')) {
-    console.log(`[Orchestrator] ${agent.name} → 旧格式兼容(技术分析)`);
-    const { analyzePrdForTechFeasibility, formatTechReportResult } = await import('../agents/tech-feasibility');
-    const result = await analyzePrdForTechFeasibility(ctx.prdContent || '', ctx.workItemName);
-    return formatTechReportResult(result, `${ctx.workItemName} · 技术可行性初评报告`, '');
-  }
-
-  // ====== 自定义工具链：按 tools 声明顺序逐个执行 ======
+  // 自定义工具链：按 tools 声明顺序逐个执行
   if (tools.length > 0) {
     console.log(`[Orchestrator] ${agent.name} → 自定义工具链: [${tools.join(', ')}]`);
     let lastOutput = '';
