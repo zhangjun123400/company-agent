@@ -108,9 +108,8 @@ async function executeAnalyzePipeline(ctx: ToolContext): Promise<string> {
   // Step 2: 搜索历史记忆（如果 mem0 技能已安装）
   const memoryContext = await callTool('mem0:search', { ...enrichCtx, previousOutput: prdContent });
 
-  // Step 3: AI 分析（注入记忆上下文）
-  const aiInput = memoryContext ? `${memoryContext}\n\n## PRD 文档\n${prdContent}` : prdContent;
-  const analysis = await callTool('ai:analyze', { ...enrichCtx, previousOutput: aiInput });
+  // Step 3: AI 分析 — PRD 走 ctx.prdContent，记忆走 previousOutput，不重复
+  const analysis = await callTool('ai:analyze', { ...enrichCtx, previousOutput: memoryContext || undefined });
 
   // Step 4: 存储分析结论到记忆（如果 mem0 技能已安装）
   await callTool('mem0:remember', { ...enrichCtx, previousOutput: analysis });
