@@ -133,6 +133,7 @@ class TimeWheel {
 
   /** 定时 tick */
   private async tick(): Promise<void> {
+    this.loadRules(); // 每次 tick 重新读规则，支持热更新
     for (const rule of this.rules) {
       if (!rule.enabled) continue;
       try { await this.checkRule(rule); }
