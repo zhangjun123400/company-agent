@@ -1,14 +1,14 @@
 /**
  * 配置管理
- * 统一从 config.env 加载所有平台凭据和参数
- * 修改 config.env 后重启服务即可生效
+ * 统一从 config/config.env 加载所有平台凭据和参数
+ * 修改 config/config.env 后重启服务即可生效
  */
 import dotenv from 'dotenv';
 import path from 'path';
 
-// 优先加载 config.env（集中配置），fallback 到 .env
-dotenv.config({ path: path.resolve(__dirname, '../config.env') });
-dotenv.config({ path: path.resolve(__dirname, '../.env') }); // 兼容旧文件
+// 加载 config/config.env（集中配置）
+dotenv.config({ path: path.resolve(__dirname, '../config/config.env') });
+dotenv.config({ path: path.resolve(__dirname, '../config/.env') }); // 兼容旧文件
 
 function requireEnv(key: string): string {
   const value = process.env[key];

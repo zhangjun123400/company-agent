@@ -2,9 +2,9 @@
 .claude/
 
 # 配置文件（含密钥，不要提交）
-config.env
-.env
-.env.*
+config/config.env
+config/.env
+config/.env.*
 
 # 依赖
 node_modules/
