@@ -177,7 +177,7 @@ h1{text-align:center;color:#1a73e8;font-size:28px;margin:10px 0}
 
 <!-- ARCHITECTURE -->
 <div class="section" style="border:2px solid #455a64;background:#eceff1">
-  <h2 style="color:#37474f">⚙️ 技术架构：SKILL.md 定义 Agent + 6 个通用工具</h2>
+  <h2 style="color:#37474f">⚙️ 技术架构：SKILL.md 定义 Agent + 8 个通用工具</h2>
   <div class="section-body" style="gap:12px">
     <div style="display:flex;flex-direction:column;gap:8px;align-items:center;min-width:120px">
       <div style="background:#455a64;color:#fff;border-radius:10px;padding:14px 20px;text-align:center;font-weight:700;font-size:15px">主智能体<br><span style="font-size:11px;font-weight:400">Orchestrator</span></div>
@@ -186,20 +186,29 @@ h1{text-align:center;color:#1a73e8;font-size:28px;margin:10px 0}
     <div style="color:#999;font-size:20px">→</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <div style="background:#bbdefb;border-radius:8px;padding:10px 14px;text-align:center;min-width:100px"><strong>注册中心</strong><br><span style="font-size:11px;color:#666">SKILL.md 热加载</span></div>
-      <div style="background:#c8e6c9;border-radius:8px;padding:10px 14px;text-align:center;min-width:100px"><strong>工具注册表</strong><br><span style="font-size:11px;color:#666">6 个通用工具</span></div>
+      <div style="background:#c8e6c9;border-radius:8px;padding:10px 14px;text-align:center;min-width:100px"><strong>工具注册表</strong><br><span style="font-size:11px;color:#666">8 个通用工具</span></div>
       <div style="background:#ffe0b2;border-radius:8px;padding:10px 14px;text-align:center;min-width:100px"><strong>隔离执行</strong><br><span style="font-size:11px;color:#666">try-catch·超时</span></div>
       <div style="background:#e1bee7;border-radius:8px;padding:10px 14px;text-align:center;min-width:100px"><strong>底座提示词</strong><br><span style="font-size:11px;color:#666">agent-persona.md</span></div>
     </div>
     <div style="color:#999;font-size:20px">↕</div>
     <div style="display:flex;flex-direction:column;gap:6px;width:100%">
-      <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
-        <div style="background:#e8f5e9;border:2px solid #43a047;border-radius:8px;padding:8px 12px;text-align:center;min-width:100px">需求分析<br><span style="font-size:11px;color:#43a047">✅ SKILL.md</span></div>
-        <div style="background:#e8f5e9;border:2px solid #43a047;border-radius:8px;padding:8px 12px;text-align:center;min-width:100px">技术初评<br><span style="font-size:11px;color:#43a047">✅ SKILL.md</span></div>
-        <div style="background:#fff3e0;border:2px dashed #fb8c00;border-radius:8px;padding:8px 12px;text-align:center;min-width:100px;opacity:.7">方案生成<br><span style="font-size:11px;color:#fb8c00">待实现</span></div>
-        <div style="background:#fff3e0;border:2px dashed #fb8c00;border-radius:8px;padding:8px 12px;text-align:center;min-width:100px;opacity:.7">代码审查<br><span style="font-size:11px;color:#fb8c00">待实现</span></div>
-        <div style="background:#fff3e0;border:2px dashed #fb8c00;border-radius:8px;padding:8px 12px;text-align:center;min-width:100px;opacity:.7">测试分析<br><span style="font-size:11px;color:#fb8c00">待实现</span></div>
-        <div style="background:#fff3e0;border:2px dashed #e1bee7;border-radius:8px;padding:8px 12px;text-align:center;min-width:100px;opacity:.7">硬件评审<br><span style="font-size:11px;color:#9c27b0">按需新增</span></div>
-        <div style="background:#e8f5e9;border:2px solid #43a047;border-radius:8px;padding:8px 12px;text-align:center;min-width:100px">定时提醒<br><span style="font-size:11px;color:#43a047">✅ 时间轮</span></div>
+      <div style="display:flex;flex-direction:column;gap:8px;width:100%">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <span style="font-size:12px;font-weight:700;color:#2e7d32;min-width:80px">✅ 已完成</span>
+          <div style="background:#e8f5e9;border:2px solid #43a047;border-radius:8px;padding:8px 12px;text-align:center;min-width:100px">需求分析<br><span style="font-size:11px;color:#43a047">SKILL.md</span></div>
+          <div style="background:#e8f5e9;border:2px solid #43a047;border-radius:8px;padding:8px 12px;text-align:center;min-width:100px">技术初评<br><span style="font-size:11px;color:#43a047">SKILL.md</span></div>
+          <div style="background:#e8f5e9;border:2px solid #43a047;border-radius:8px;padding:8px 12px;text-align:center;min-width:100px">定时提醒<br><span style="font-size:11px;color:#43a047">时间轮</span></div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <span style="font-size:12px;font-weight:700;color:#ef6c00;min-width:80px">🕐 待实现</span>
+          <div style="background:#fff3e0;border:2px dashed #fb8c00;border-radius:8px;padding:8px 12px;text-align:center;min-width:100px;opacity:.7">方案生成<br><span style="font-size:11px;color:#fb8c00">待实现</span></div>
+          <div style="background:#fff3e0;border:2px dashed #fb8c00;border-radius:8px;padding:8px 12px;text-align:center;min-width:100px;opacity:.7">代码审查<br><span style="font-size:11px;color:#fb8c00">待实现</span></div>
+          <div style="background:#fff3e0;border:2px dashed #fb8c00;border-radius:8px;padding:8px 12px;text-align:center;min-width:100px;opacity:.7">测试分析<br><span style="font-size:11px;color:#fb8c00">待实现</span></div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <span style="font-size:12px;font-weight:700;color:#7b1fa2;min-width:80px">🆕 按需新增</span>
+          <div style="background:#f3e5f5;border:2px dashed #9c27b0;border-radius:8px;padding:8px 12px;text-align:center;min-width:100px;opacity:.7">硬件评审<br><span style="font-size:11px;color:#9c27b0">按需</span></div>
+        </div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;padding-top:8px;border-top:1px solid #ddd">
         <span style="font-size:11px;color:#888">8 个通用工具：</span>
