@@ -25,7 +25,7 @@
         "previousNode": "需求评审"
       },
       "targetNode": "技术可行性确认",
-      "timeoutMinutes": 4320，
+      "timeoutMinutes": 4320,
       "remind": {
         "target": "节点负责人",
         "fallbackUserKey": "7649567855117192178"
