@@ -1,0 +1,36 @@
+{
+  "rules": [
+    {
+      "id": "prd-review-timeout",
+      "name": "需求评审超时提醒",
+      "description": "需求提出后，需求评审节点2小时内未完成则提醒需求录入者",
+      "trigger": {
+        "on": "after_create",
+        "workItemType": "需求"
+      },
+      "targetNode": "需求评审",
+      "timeoutMinutes": 120,
+      "remind": {
+        "target": "需求提出者",
+        "fallbackName": ""
+      },
+      "enabled": true
+    },
+    {
+      "id": "tech-feasibility-timeout",
+      "name": "技术可行性确认超时提醒",
+      "description": "需求评审通过后，技术可行性确认节点2小时内未完成则提醒技术负责人；若为空则提醒配置的备选人",
+      "trigger": {
+        "on": "after_node_completed",
+        "previousNode": "需求评审"
+      },
+      "targetNode": "技术可行性确认",
+      "timeoutMinutes": 120,
+      "remind": {
+        "target": "节点负责人",
+        "fallbackName": "张军"
+      },
+      "enabled": true
+    }
+  ]
+}

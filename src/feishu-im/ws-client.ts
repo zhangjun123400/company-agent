@@ -13,6 +13,7 @@ import { enqueue } from '../utils/user-queue';
 
 const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY || '';
 const TRIGGER_KW = ['分析', '需求澄清', '技术可行性', '出报告'];
+const REMINDER_KW = ['检查超时', '超时提醒', '提醒'];
 
 // 待确认队列: 用户 ID → { workItemName, workItemId }
 const pendingConfirms = new Map<string, { name: string; id: string }>();
@@ -223,6 +224,16 @@ export function startFeishuWS(): void {
               await sendIM(chatId, result);
               return;
             }
+          }
+
+          // 0.5. 超时提醒触发
+          if (REMINDER_KW.some(kw => content.includes(kw))) {
+            try {
+              const { timeWheel } = await import('../core/timewheel');
+              const r = await timeWheel.runOnce();
+              await sendIM(chatId, `⏰ 检查完成：${r.totalRules} 条规则，${r.remindersSent} 条超时提醒已发送`);
+            } catch (e) { await sendIM(chatId, '提醒检查失败，请查看服务日志'); }
+            return;
           }
 
           // 1. Management commands

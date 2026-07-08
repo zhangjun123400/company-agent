@@ -67,6 +67,14 @@ async function agentExecutor(agent: AgentConfig, ctx: ExecutionContext): Promise
     return callTool('im:send', toolCtx);
   }
 
+  // 模式 D：定时提醒模式
+  if (hasAll(tools, ['project:query', 'im:send'])) {
+    console.log(`[Orchestrator] ${agent.name} → 定时提醒模式`);
+    const { timeWheel } = require('./timewheel');
+    const result = await timeWheel.runOnce();
+    return `检查完成：${result.totalRules} 条规则，${result.remindersSent} 条提醒已发送`;
+  }
+
   // 自定义工具链：按 tools 声明顺序逐个执行
   if (tools.length > 0) {
     console.log(`[Orchestrator] ${agent.name} → 自定义工具链: [${tools.join(', ')}]`);
@@ -192,7 +200,7 @@ export async function createAgentFromMessage(
   }
 }
 
-/** 初始化：内置工具 → 外部技能 → 加载 Agent → 重建映射 */
+/** 初始化：内置工具 → 外部技能 → 加载 Agent → 启动时间轮 → 重建映射 */
 export async function init(): Promise<void> {
   const { registerAllTools } = require('../tools');
   registerAllTools();
@@ -200,6 +208,10 @@ export async function init(): Promise<void> {
   // 加载外部技能（如 mem0、drawio-generator 等）
   const { skillLoader } = require('../skills/loader');
   await skillLoader.loadAll();
+
+  // 启动时间轮提醒系统
+  const { timeWheel } = require('./timewheel');
+  timeWheel.start();
 
   registry.loadAll();
   dispatcher.rebuild();
