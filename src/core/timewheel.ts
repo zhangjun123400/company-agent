@@ -72,7 +72,17 @@ class TimeWheel {
     try {
       if (!fs.existsSync(RULES_FILE)) return;
       const config: ReminderRulesConfig = JSON.parse(fs.readFileSync(RULES_FILE, 'utf-8'));
-      this.rules = config.rules.filter(r => r.enabled);
+      const enabled: ReminderRule[] = [];
+      for (const r of config.rules) {
+        if (!r.enabled) continue;
+        // 校验 after_node_completed 必须指定 previousNode
+        if (r.trigger.on === 'after_node_completed' && !r.trigger.previousNode) {
+          console.error(`[TimeWheel] ${r.id}: after_node_completed 缺少 previousNode，跳过`);
+          continue;
+        }
+        enabled.push(r);
+      }
+      this.rules = enabled;
       console.log(`[TimeWheel] 已加载 ${this.rules.length} 条提醒规则`);
     } catch (e) { console.error('[TimeWheel] 规则加载失败:', e); }
   }
@@ -160,10 +170,8 @@ class TimeWheel {
       }
     }
 
-    if (sent > 0) {
-      this.saveState(state);
-      console.log(`[TimeWheel] ${rule.id}: ${sent} 条超时提醒`);
-    }
+    if (sent > 0) console.log(`[TimeWheel] ${rule.id}: ${sent} 条超时提醒`);
+    this.saveState(state);
     return sent;
   }
 
@@ -232,22 +240,27 @@ class TimeWheel {
   private async fetchWorkItems(rule: ReminderRule): Promise<WorkItem[]> {
     const t = await getMeegleToken();
     const H = { 'X-Plugin-Token': t, 'X-User-Key': projectConfig.userKey };
+    const typeKey = rule.trigger.workItemType
+      ? await this.resolveTypeKey(rule.trigger.workItemType)
+      : 'story';
 
-    // 查询指定类型的工作项
-    const res = await axios.post(
-      `https://project.feishu.cn/open_api/${projectConfig.spaceKey}/work_item/filter`,
-      {
-        work_item_type_keys: rule.trigger.workItemType ? [ await this.resolveTypeKey(rule.trigger.workItemType) ] : ['story'],
-        page_size: 50, page_num: 1,
-      },
-      { headers: H }
-    );
+    // 翻页查询全部工作项
+    let allItems: { id: string }[] = [];
+    for (let page = 1; page <= 10; page++) {
+      const res = await axios.post(
+        `https://project.feishu.cn/open_api/${projectConfig.spaceKey}/work_item/filter`,
+        { work_item_type_keys: [typeKey], page_size: 50, page_num: page },
+        { headers: H }
+      );
+      const data = res.data.data || [];
+      allItems.push(...data);
+      if (data.length < 50) break; // 最后一页
+    }
 
-    const items = res.data.data || [];
-    if (items.length === 0) return [];
+    if (allItems.length === 0) return [];
 
-    // 批量查询详情（含 workflow_nodes）
-    const ids = items.map((i: { id: string }) => parseInt(i.id, 10));
+    // 批量查询详情（含 workflow_nodes），每批最多 50 个
+    const ids = allItems.map(i => parseInt(i.id, 10));
     const detailRes = await axios.post(
       `https://project.feishu.cn/open_api/${projectConfig.spaceKey}/work_item/story/query`,
       { work_item_ids: ids, expand: { need_workflow: true } },
@@ -275,6 +288,7 @@ class TimeWheel {
     );
     const types = res.data.data || [];
     const found = types.find((tp: { name: string; type_key: string }) => tp.name === typeName);
+    if (!found) console.warn(`[TimeWheel] 类型名 "${typeName}" 未匹配，降级为 story`);
     return found ? found.type_key : 'story';
   }
 
@@ -331,7 +345,9 @@ export const timeWheel = new TimeWheel();
 
 let meegleToken: string | null = null;
 async function getMeegleToken(): Promise<string> {
-  if (meegleToken) return meegleToken;
+  try {
+    if (meegleToken) return meegleToken;
+  } catch { meegleToken = null; }
   const res = await axios.post('https://project.feishu.cn/open_api/authen/plugin_token', {
     plugin_id: projectConfig.pluginId, plugin_secret: projectConfig.pluginSecret, type: 1,
   });
@@ -341,7 +357,9 @@ async function getMeegleToken(): Promise<string> {
 
 let tenantToken: string | null = null;
 async function getTenantToken(): Promise<string> {
-  if (tenantToken) return tenantToken;
+  try {
+    if (tenantToken) return tenantToken;
+  } catch { tenantToken = null; }
   const res = await axios.post('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
     app_id: feishuApp.appId, app_secret: feishuApp.appSecret,
   });
