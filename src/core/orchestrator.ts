@@ -105,13 +105,20 @@ async function executeAnalyzePipeline(ctx: ToolContext): Promise<string> {
   const prdContent = await callTool('wiki:read', ctx);
   const enrichCtx = { ...ctx, prdContent };
 
-  // Step 2: AI 分析
-  const analysis = await callTool('ai:analyze', { ...enrichCtx, previousOutput: prdContent });
+  // Step 2: 搜索历史记忆（如果 mem0 技能已安装）
+  const memoryContext = await callTool('mem0:search', { ...enrichCtx, previousOutput: prdContent });
 
-  // Step 3: 出文档
+  // Step 3: AI 分析（注入记忆上下文）
+  const aiInput = memoryContext ? `${memoryContext}\n\n## PRD 文档\n${prdContent}` : prdContent;
+  const analysis = await callTool('ai:analyze', { ...enrichCtx, previousOutput: aiInput });
+
+  // Step 4: 存储分析结论到记忆（如果 mem0 技能已安装）
+  await callTool('mem0:remember', { ...enrichCtx, previousOutput: analysis });
+
+  // Step 5: 出文档
   const docUrl = await callTool('docx:create', { ...enrichCtx, previousOutput: analysis });
 
-  // Step 4: 通知
+  // Step 6: 通知
   await callTool('im:send', { ...enrichCtx, previousOutput: docUrl });
 
   return docUrl;

@@ -6,7 +6,9 @@ node: 需求评审
 department: 软件研发部
 tools:
   - wiki:read
+  - mem0:search
   - ai:analyze
+  - mem0:remember
   - docx:create
   - im:send
 output_target:
