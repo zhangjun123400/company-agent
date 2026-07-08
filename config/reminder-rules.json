@@ -12,14 +12,14 @@
       "timeoutMinutes": 120,
       "remind": {
         "target": "需求提出者",
-        "fallbackName": ""
+        "fallbackOpenId": ""
       },
       "enabled": true
     },
     {
       "id": "tech-feasibility-timeout",
       "name": "技术可行性确认超时提醒",
-      "description": "需求评审通过后，技术可行性确认节点2小时内未完成则提醒技术负责人；若为空则提醒配置的备选人",
+      "description": "需求评审通过后，技术可行性确认节点2小时内未完成则提醒技术负责人；若为空则提醒配置备选人",
       "trigger": {
         "on": "after_node_completed",
         "previousNode": "需求评审"
@@ -28,7 +28,7 @@
       "timeoutMinutes": 120,
       "remind": {
         "target": "节点负责人",
-        "fallbackName": "张军"
+        "fallbackOpenId": "ou_8de837db0c63b31eaebbb465c18c9ea8"
       },
       "enabled": true
     }

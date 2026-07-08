@@ -23,8 +23,8 @@ interface ReminderRule {
   targetNode: string;
   timeoutMinutes: number;
   remind: {
-    target: string;        // "需求提出者" | "节点负责人"
-    fallbackName: string;  // 备选人
+    target: string;           // "需求提出者" | "节点负责人"
+    fallbackOpenId: string;   // 备选人 open_id（直接可用）
   };
   enabled: boolean;
 }
@@ -53,11 +53,19 @@ interface WorkItem {
 // ==================== 时间轮 ====================
 
 const RULES_FILE = path.resolve(__dirname, '../../config/reminder-rules.json');
-const TICK_MS = 30 * 60 * 1000; // 30 分钟 tick 一次
+const STATE_FILE = path.resolve(__dirname, '../../output/reminder-state.json');
+const TICK_HOURS = [10, 16]; // 每天 10:30 和 16:00 检查
+const TICK_MINUTE = 30;
+const WINDOW_MINUTES = 5;    // ±5 分钟窗口
+
+interface ReminderState {
+  [key: string]: number;  // "ruleId::itemId" → 上次提醒时间戳
+}
 
 class TimeWheel {
   private rules: ReminderRule[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
+  private lastTickDay = ''; // 防止同一天同一窗口重复 tick
 
   /** 加载规则配置 */
   loadRules(): void {
@@ -69,12 +77,29 @@ class TimeWheel {
     } catch (e) { console.error('[TimeWheel] 规则加载失败:', e); }
   }
 
-  /** 启动时间轮 */
+  /** 启动时间轮：每分钟检查是否到了提醒时间窗口 */
   start(): void {
     this.loadRules();
-    this.tick(); // 启动时立即执行一次
-    this.timer = setInterval(() => this.tick(), TICK_MS);
-    console.log(`[TimeWheel] 已启动, tick 间隔 ${TICK_MS / 60000} 分钟`);
+    this.timer = setInterval(() => {
+      const now = new Date();
+      const h = now.getHours();
+      const m = now.getMinutes();
+      const day = now.toDateString();
+
+      // 检查是否在 10:30 或 16:00 的 ±5 分钟窗口内
+      const inWindow = TICK_HOURS.some(th =>
+        h === th && m >= TICK_MINUTE - WINDOW_MINUTES && m <= TICK_MINUTE + WINDOW_MINUTES
+      );
+
+      if (inWindow) {
+        const slotKey = `${day}-${h}:${TICK_MINUTE}`;
+        if (this.lastTickDay === slotKey) return; // 同一窗口已经执行过
+        this.lastTickDay = slotKey;
+        console.log(`[TimeWheel] ⏰ 定时提醒窗口 ${h}:${TICK_MINUTE}`);
+        this.tick();
+      }
+    }, 60 * 1000); // 每分钟检查一次
+    console.log(`[TimeWheel] 已启动, 提醒时间: 每天 ${TICK_HOURS.join(':30 / ')}:30`);
   }
 
   /** 停止时间轮 */
@@ -82,9 +107,9 @@ class TimeWheel {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
   }
 
-  /** 执行一次完整检查（供手动触发） */
+  /** 执行一次完整检查（供手动触发，不受时间窗口限制） */
   async runOnce(): Promise<{ totalRules: number; remindersSent: number }> {
-    this.loadRules(); // 重新读规则，支持热更新
+    this.loadRules();
     let remindersSent = 0;
     for (const rule of this.rules) {
       if (!rule.enabled) continue;
@@ -109,10 +134,17 @@ class TimeWheel {
 
   private async checkRule(rule: ReminderRule): Promise<number> {
     const items = await this.fetchWorkItems(rule);
+    const state = this.loadState();
     let sent = 0;
 
     for (const item of items) {
       if (!item.workflow_nodes) continue;
+
+      // 去重：已完成的工作项不再提醒，已提醒过的跳过
+      const stateKey = `${rule.id}::${item.id}`;
+      const lastReminded = state[stateKey] || 0;
+      // 24 小时内已经提醒过 → 跳过
+      if (Date.now() - lastReminded < 24 * 60 * 60 * 1000) continue;
 
       const isOverdue = rule.trigger.on === 'after_create'
         ? this.checkAfterCreate(item, rule)
@@ -120,12 +152,47 @@ class TimeWheel {
 
       if (isOverdue) {
         await this.sendReminder(item, rule);
+        state[stateKey] = Date.now();
         sent++;
+      } else if (this.isCompleted(item, rule.targetNode)) {
+        // 已完成 → 清除提醒记录，释放存储
+        delete state[stateKey];
       }
     }
 
-    if (sent > 0) console.log(`[TimeWheel] ${rule.id}: ${sent} 条超时提醒`);
+    if (sent > 0) {
+      this.saveState(state);
+      console.log(`[TimeWheel] ${rule.id}: ${sent} 条超时提醒`);
+    }
     return sent;
+  }
+
+  /** 检查目标节点是否已完成 */
+  private isCompleted(item: WorkItem, nodeName: string): boolean {
+    const node = item.workflow_nodes?.find(n => n.name === nodeName);
+    return node ? node.status === 3 && !!node.actual_finish_time : false;
+  }
+
+  /** 加载提醒状态 */
+  private loadState(): ReminderState {
+    try {
+      if (fs.existsSync(STATE_FILE)) return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
+    } catch { /* ignore */ }
+    return {};
+  }
+
+  /** 保存提醒状态 */
+  private saveState(state: ReminderState): void {
+    try {
+      const dir = path.dirname(STATE_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      // 清理超过 7 天的记录
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      for (const [k, ts] of Object.entries(state)) {
+        if (ts < cutoff) delete state[k];
+      }
+      fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
+    } catch { /* ignore */ }
   }
 
   /** 规则类型 A: 工作项创建后 N 分钟未完成目标节点 */
@@ -247,9 +314,9 @@ class TimeWheel {
       if (owners.length > 0) return resolveUserKey(owners[0]);
     }
 
-    // 备选：按姓名搜索
-    if (rule.remind.fallbackName) {
-      return searchUserByName(rule.remind.fallbackName);
+    // 备选：直接使用配置的 open_id
+    if (rule.remind.fallbackOpenId) {
+      return rule.remind.fallbackOpenId;
     }
 
     return null;
@@ -316,21 +383,15 @@ async function resolveUserKey(userKey: string): Promise<string | null> {
     const uArr = ur.data.data || [];
     const name = uArr[0]?.name?.zh_cn || uArr[0]?.name_cn || uArr[0]?.name?.default || '';
     if (name) {
-      return searchUserByName(name);
+      const t = await getTenantToken();
+      const sr = await axios.get(
+        `https://open.feishu.cn/open-apis/contact/v3/users?page_size=3&name=${encodeURIComponent(name)}`,
+        { headers: { Authorization: `Bearer ${t}` } }
+      );
+      const items = sr.data.data?.items || [];
+      return items[0]?.open_id || null;
     }
   } catch { /* skip */ }
 
   return null;
-}
-
-async function searchUserByName(name: string): Promise<string | null> {
-  try {
-    const t = await getTenantToken();
-    const res = await axios.get(
-      `https://open.feishu.cn/open-apis/contact/v3/users?page_size=3&name=${encodeURIComponent(name)}`,
-      { headers: { Authorization: `Bearer ${t}` } }
-    );
-    const items = res.data.data?.items || [];
-    return items[0]?.open_id || null;
-  } catch { return null; }
 }
