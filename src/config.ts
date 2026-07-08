@@ -29,7 +29,6 @@ export const projectConfig = {
   apiBase: optionalEnv('FEISHU_PROJECT_API_BASE', 'https://project.feishu.cn/open_api'),
   spaceKey: optionalEnv('PROJECT_SPACE_KEY', 'aniwonder'),
   spaceId: optionalEnv('PROJECT_SPACE_ID'),
-  prdReviewTimeoutDays: parseInt(process.env.PRD_REVIEW_TIMEOUT_DAYS || '3', 10),
 };
 
 // ==================== 飞书 IM + 文档（智小协机器人） ====================
@@ -44,10 +43,6 @@ export const feishuApp = {
 export const aiModel = optionalEnv('AI_MODEL', 'deepseek');
 export const deepseekApiKey = optionalEnv('DEEPSEEK_API_KEY');
 export const deepseekBaseUrl = optionalEnv('DEEPSEEK_BASE_URL', 'https://api.deepseek.com');
-
-// ==================== 定时任务 ====================
-
-export const checkCron = optionalEnv('CHECK_CRON', '0 9 * * *');
 
 // ==================== API 端点常量 ====================
 

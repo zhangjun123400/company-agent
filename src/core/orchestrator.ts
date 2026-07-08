@@ -8,7 +8,7 @@ import path from 'path';
 import { registry, type AgentConfig } from './registry';
 import { dispatcher } from './dispatcher';
 import { executeNodeAgents, type ExecutionContext, type ExecutionResult } from './sandbox';
-import { isAdmin } from './permission';
+
 import { toolRegistry } from '../tools';
 import type { ToolContext } from '../tools/_types';
 
@@ -159,10 +159,6 @@ export async function createAgentFromMessage(
   description: string,
   senderOpenId: string
 ): Promise<string> {
-  if (!isAdmin(senderOpenId)) {
-    return '❌ 仅管理员可新增智能体';
-  }
-
   const { aiComplete } = await import('../utils/ai-client');
   const parsed = await aiComplete({
     messages: [{

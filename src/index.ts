@@ -12,7 +12,7 @@ import { cleanupOldFiles } from './utils/cleanup';
 import { init as initOrchestrator, dispatchNode } from './core/orchestrator';
 import { registry } from './core/registry';
 import { dispatcher } from './core/dispatcher';
-import { isAdmin } from './core/permission';
+
 import axios from 'axios';
 
 const FEISHU_APP_ID = feishuApp.appId;
@@ -347,8 +347,7 @@ app.get('/api/agents/nodes', (_req, res) => {
 
 app.post('/api/agents/register', express.json(), (req, res) => {
   try {
-    const { config, adminId } = req.body;
-    if (!isAdmin(adminId)) { res.status(403).json({ error: '仅管理员可新增智能体' }); return; }
+    const { config } = req.body;
     registry.register(config);
     dispatcher.rebuild();
     res.json({ ok: true, msg: `智能体「${config.name}」已注册` });
@@ -357,8 +356,7 @@ app.post('/api/agents/register', express.json(), (req, res) => {
 
 app.post('/api/agents/unregister', express.json(), (req, res) => {
   try {
-    const { id, adminId } = req.body;
-    if (!isAdmin(adminId)) { res.status(403).json({ error: '仅管理员可删除智能体' }); return; }
+    const { id } = req.body;
     registry.unregister(id);
     dispatcher.rebuild();
     res.json({ ok: true, msg: '已删除' });
