@@ -54,15 +54,27 @@ export function storeInitialToken(authResult: {
 export async function getWikiAccessToken(): Promise<string | null> {
   if (!cachedToken) cachedToken = loadToken();
   if (!cachedToken) return null;
-  // 仅使用 access_token 有效期（2小时），不自动续期
-  // 14天后 refresh_token 过期，需重新授权
+
+  // access_token 有效 → 直接返回
   if (Date.now() < cachedToken.expire_at) return cachedToken.access_token;
-  console.log('[WikiToken] access_token 已过期，需重新授权');
+
+  // access_token 过期但 refresh_token 有效 → 自动续期
+  if (Date.now() < cachedToken.refresh_expire_at) {
+    console.log('[WikiToken] access_token 过期，尝试 refresh_token 续期...');
+    const newToken = await refreshAccessToken(cachedToken);
+    if (newToken) {
+      console.log('[WikiToken] ✅ 自动续期成功');
+      return newToken;
+    }
+    console.log('[WikiToken] ❌ 续期失败，需重新授权');
+  }
+
+  // refresh_token 也过期 → 需重新 OAuth 授权
+  console.log('[WikiToken] refresh_token 已过期，需重新授权');
   cachedToken = null; try { fs.unlinkSync(TOKEN_FILE); } catch { /* ignore */ }
   return null;
 }
 
-/** @deprecated 不再自动续期 — 14天到期后需重新授权 */
 async function refreshAccessToken(data: WikiTokenData): Promise<string | null> {
   try {
     const res = await axios.post('https://open.feishu.cn/open-apis/authen/v1/oidc/refresh_access_token', {
@@ -82,5 +94,5 @@ async function refreshAccessToken(data: WikiTokenData): Promise<string | null> {
 
 export function hasWikiToken(): boolean {
   if (!cachedToken) cachedToken = loadToken();
-  return cachedToken !== null && Date.now() < cachedToken.expire_at;
+  return cachedToken !== null && Date.now() < cachedToken.refresh_expire_at;
 }
