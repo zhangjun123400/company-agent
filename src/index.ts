@@ -464,7 +464,7 @@ async function handleIMTrigger(workItemName: string, senderOpenId: string) {
   }
 }
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log('');
   console.log('╔══════════════════════════════════════════╗');
   console.log('║        🧠 智慧智能体 已启动              ║');
@@ -485,7 +485,7 @@ app.listen(PORT, () => {
   }
 
   // 启动多智能体编排引擎
-  initOrchestrator();
+  await initOrchestrator();
 
   // 清理旧 MD 文件（7天前）+ 每天执行
   cleanupOldFiles();

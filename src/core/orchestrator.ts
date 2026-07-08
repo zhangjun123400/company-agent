@@ -186,10 +186,15 @@ export async function createAgentFromMessage(
   }
 }
 
-/** 初始化：注册工具 + 加载 Agent + 重建映射 */
-export function init(): void {
+/** 初始化：内置工具 → 外部技能 → 加载 Agent → 重建映射 */
+export async function init(): Promise<void> {
   const { registerAllTools } = require('../tools');
   registerAllTools();
+
+  // 加载外部技能（如 mem0、drawio-generator 等）
+  const { skillLoader } = require('../skills/loader');
+  await skillLoader.loadAll();
+
   registry.loadAll();
   dispatcher.rebuild();
   registry.startWatch();
