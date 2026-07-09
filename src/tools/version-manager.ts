@@ -151,20 +151,26 @@ async function genChartImage(type: string, data: Record<string, unknown>, name: 
 // ==================== Docx 发布 ====================
 
 export async function publishAsDocx(title: string, mdContent: string, chartPngFiles: string[]): Promise<string> {
+  // 优先用用户自己的 access_token（文档归属用户，无需额外授权）
+  const { getWikiAccessToken } = await import('../auth/wiki-token');
+  const userToken = await getWikiAccessToken();
+
+  // 图片上传仍需 tenant_token（im/v1/images 不支持 user_token）
   const tokenRes = await axios.post('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
     app_id: (await import('../../src/config')).feishuApp.appId,
     app_secret: (await import('../../src/config')).feishuApp.appSecret,
   });
-  const H = { Authorization: `Bearer ${tokenRes.data.tenant_access_token}` };
+  const imgH = { Authorization: `Bearer ${tokenRes.data.tenant_access_token}` };
+  const docH = userToken ? { Authorization: `Bearer ${userToken}` } : imgH;
 
-  // 1. 上传图表 PNG → 获取 image_key
+  // 1. 上传图表 PNG → 获取 image_key（用 app token）
   const imageBlocks: { marker: string; imageKey: string; width: number; height: number }[] = [];
   for (const pngPath of chartPngFiles) {
     try {
       const fd = new (require('form-data'))();
       fd.append('image_type', 'message');
       fd.append('image', fs.createReadStream(pngPath));
-      const r = await axios.post('https://open.feishu.cn/open-apis/im/v1/images', fd, { headers: { ...H, ...fd.getHeaders() } });
+      const r = await axios.post('https://open.feishu.cn/open-apis/im/v1/images', fd, { headers: { ...imgH, ...fd.getHeaders() } });
       const ik = r.data?.data?.image_key;
       if (ik) {
         const base = path.basename(pngPath, '.png');
@@ -174,11 +180,11 @@ export async function publishAsDocx(title: string, mdContent: string, chartPngFi
     } catch (e) { /* skip */ }
   }
 
-  // 2. 创建 Docx 文档
-  const docRes = await axios.post('https://open.feishu.cn/open-apis/docx/v1/documents', { title }, { headers: H });
+  // 2. 创建 Docx 文档（用用户 token，文档归属用户）
+  const docRes = await axios.post('https://open.feishu.cn/open-apis/docx/v1/documents', { title }, { headers: docH });
   const docId: string = docRes.data.data.document.document_id;
 
-  // 3. 将 MD 内容转为 Docx 块 + 嵌入图片（每块内容截断 2500 字符防止 API 报错）
+  // 3. 将 MD 内容转为 Docx 块 + 嵌入图片
   const blocks = mdToDocxBlocks(mdContent, imageBlocks).map((b: any) => {
     if (b.text?.elements?.[0]?.text_run?.content?.length > 2500) {
       b.text.elements[0].text_run.content = b.text.elements[0].text_run.content.slice(0, 2500) + '...(截断)';
@@ -186,18 +192,12 @@ export async function publishAsDocx(title: string, mdContent: string, chartPngFi
     return b;
   });
 
-  // 4. 分批写入（每批最多 50 块）
+  // 4. 分批写入（用用户 token）
   for (let i = 0; i < blocks.length; i += 50) {
     await axios.post(`https://open.feishu.cn/open-apis/docx/v1/documents/${docId}/blocks/${docId}/children`,
-      { children: blocks.slice(i, i + 50) }, { headers: H }).catch(() => {});
+      { children: blocks.slice(i, i + 50) }, { headers: docH }).catch(() => {});
     if (i + 50 < blocks.length) await new Promise(r => setTimeout(r, 300));
   }
-
-  // 5. 授权给目标用户
-  const targetOpenId = 'ou_8de837db0c63b31eaebbb465c18c9ea8';
-  await axios.post(`https://open.feishu.cn/open-apis/drive/v1/permissions/${docId}/members?type=docx`,
-    { member_type: 'openid', member_id: targetOpenId, perm: 'full_access' },
-    { headers: H }).catch(() => {});
 
   const docUrl = `https://p1iscu6mj28.feishu.cn/docx/${docId}`;
   console.log(`[docx] ✅ ${title} → ${docUrl}`);
