@@ -1,6 +1,6 @@
 # 版本管理智能体方案
 
-> 日期: 2026-07-08 | 版本: v2.0 | 状态: 待审批
+> 日期: 2026-07-09 | 版本: v2.1 | 状态: 待审批
 
 ---
 
@@ -105,7 +105,26 @@
       状态:未完成 | 需在门禁评审前关闭
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-七、综合风险提示
+七、SRD 层级树（递归展开）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ V0.1.0:
+  ├─ 一级「一级2」⚠️标记完成但子任务未完成
+  │   ├─ 二级「2.1」✅ 已完成 (运控‖软件中台→联调→完成)
+  │   └─ 二级「2.2」🟡 待开发 (运控)
+
+ V0.1.1:
+  ├─ 一级「test-一级任务」⚠️标记完成但子任务未完成
+  │   ├─ 二级「test-二级任务」🟡 联调中 (运控‖软件中台‖导航→联调)
+  │   └─ 二级「test-2.2级任务」🔴 待开发 (未分配)
+  └─ (无其他一级任务)
+
+ V3.0.0:
+  └─ 二级「2.1」✅ 已完成 (运控‖软件中台→联调→完成)
+
+⚠️ 2 个父任务标记完成但叶子未完成，进度不可信！
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+八、综合风险提示
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  🔴 V0.1.0 门禁阻塞 + NUDD 高风险未关闭，建议优先处理
  ⚠️ 7652601194900098238 跨 2 版本负载过高，V0.1.0 门禁通过前无法释放
@@ -165,7 +184,18 @@
 ⏳ 门禁评审      待开始  预计 2026-07-24 → 2026-07-25
 ⏳ 上线          待开始  预计 2026-07-26
 
-关联 SRD：7 个 | 涉及人员：4 人
+━━━━━━━━━━━━━━━━━━━━━━
+SRD 任务清单（叶子任务）
+━━━━━━━━━━━━━━━━━━━━━━
+ 一级「一级2」
+   ├─ 2.1 [运控·软件中台]  王五  ✅ 已完成
+   └─ 2.2 [运控]          赵六  🟡 待开发
+ 一级「test-一级任务」
+   ├─ test-二级任务 [运控·软件中台·导航] 李四  🟡 联调中
+   └─ test-2.2级任务 [未分配]             🔴 待开发
+ 二级「2.1」[运控·软件中台] 王五  ✅ 已完成
+
+涉及人员：3 人 | 已完成：2/5 叶子任务
 
 如有疑问请联系版本 PM。
 ```
@@ -204,7 +234,9 @@
 偏离 ≤ −15% → 落后超过 15%，触发提醒
 ```
 
-**举例**：开发节点计划 10 天，已过 6.5 天 → 预期进度 65%。SRD 共 7 个已完成 3 个 → 实际进度 42%。偏离 = 42% − 65% = **−23%** > 15% → 触发。
+**举例**：开发节点计划 10 天，已过 6.5 天 → 预期 65%。版本下 2 个一级任务共 5 个叶子 SRD，递归统计：3 个叶子的「已完成」节点 status=3 → 实际 60%。偏离 = 60% − 65% = −5% → 正常。
+
+> 若用不可信的 `是否完成` 字段：父任务标记完成 → 算 2/2 = 100%，虚高，掩盖了 2 个叶子未完成的真实情况。
 
 ### 4.2 节点时长配置
 
@@ -303,20 +335,41 @@
 ### 5.4 进度计算核心逻辑
 
 ```typescript
-function calcDeviation(version, nodeDurations): { expected: number, actual: number, deviation: number } {
-  // 找到当前活跃节点（status=2）
+/** 递归收集所有叶子 SRD（无子任务的最底层节点） */
+function collectLeaves(srdIds: number[], allSRDs: Map<number, SRD>): SRD[] {
+  const leaves: SRD[] = [];
+  for (const id of srdIds) {
+    const srd = allSRDs.get(id);
+    if (!srd) continue;
+    const children = allSRDs.filter(s => s.parentId === id);
+    if (children.length === 0) {
+      leaves.push(srd);          // 叶子节点
+    } else {
+      leaves.push(...collectLeaves(children.map(c => c.id), allSRDs)); // 递归
+    }
+  }
+  return leaves;
+}
+
+function calcDeviation(version, allSRDs, nodeDurations) {
   const activeNode = version.workflow_nodes.find(n => n.status === 2);
   if (!activeNode) return null;
 
   const plannedDays = nodeDurations[activeNode.name];
   if (!plannedDays) return null;
 
-  const elapsed = (Date.now() - new Date(activeNode.actual_begin_time).getTime()) / (24 * 3600 * 1000);
+  // 预期进度：按时间线性
+  const elapsed = (Date.now() - new Date(activeNode.actual_begin_time).getTime()) / (24*3600*1000);
   const expected = Math.min(100, (elapsed / plannedDays) * 100);
 
-  const totalSRDs = version.跟版SRD.length;
-  const completedSRDs = version.SRD开发完成进度;
-  const actual = totalSRDs > 0 ? (completedSRDs / totalSRDs) * 100 : 0;
+  // 实际进度：递归统计叶子 SRD 的「已完成」节点
+  const srdIds = version.fields.跟版SRD;
+  const leaves = collectLeaves(srdIds, allSRDs);
+  const total = leaves.length;
+  const completed = leaves.filter(s =>
+    s.workflow_nodes?.find(n => n.name === '已完成')?.status === 3
+  ).length;
+  const actual = total > 0 ? (completed / total) * 100 : 0;
 
   return {
     expected: Math.round(expected),
