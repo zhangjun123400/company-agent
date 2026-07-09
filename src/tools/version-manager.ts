@@ -669,7 +669,7 @@ export async function runScheduleNotice(versionId?: string): Promise<string> {
 
   return [
     H_HEAD,
-    `<h1>📋 版本排期通知</h1><p style="color:#9ca3af;margin-bottom:20px">生成时间：${now}</p>`,
+    `<div class="m-header"><h1>📋 版本排期通知</h1><div class="subtitle">${now}</div></div>`,
     ``,
     ...parts,
     H_TAIL,
@@ -732,7 +732,12 @@ export async function checkProgressDeviation(nodeDurations: Record<string, numbe
 
     return [
       H_HEAD,
-      `<h1>⚠️ 版本 ${v.name} 进度偏离报告</h1><p style="color:#9ca3af;margin-bottom:20px">时间：${nowStr}</p>`,
+      `<div class="m-header"><h1>⚠️ 版本 ${v.name} 进度偏离报告</h1><div class="subtitle">${nowStr}</div>`,
+      `<div class="kpi-row">`,
+      `<div class="kpi"><div class="metric ${deviation<=-15?'red':''}">${deviation}%</div><div class="label">进度偏离</div></div>`,
+      `<div class="kpi"><div class="metric">${Math.round(actual)}%</div><div class="label">实际进度</div></div>`,
+      `<div class="kpi"><div class="metric">${Math.round(expected)}%</div><div class="label">预期进度</div></div>`,
+      `</div></div>`,
       ``,
       `## 进度对比`,
       ``,
