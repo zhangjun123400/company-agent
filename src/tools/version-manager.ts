@@ -729,16 +729,18 @@ export async function runScheduleNotice(versionId?: string): Promise<string> {
     );
   }
 
+  const tlLeavesAll = targetVers.reduce((s,v)=>{const ids=(extractField(v as unknown as Record<string,unknown>,'跟版SRD') as number[])||[];return s+collectLeaves(ids.map(String),srdMap).length;},0);
+  const tlDoneAll = targetVers.reduce((s,v)=>{const ids=(extractField(v as unknown as Record<string,unknown>,'跟版SRD') as number[])||[];return s+collectLeaves(ids.map(String),srdMap).filter(l=>l.completed).length;},0);
+  const tlPeople = new Set<string>();targetVers.forEach(v=>{const ids=(extractField(v as unknown as Record<string,unknown>,'跟版SRD') as number[])||[];collectLeaves(ids.map(String),srdMap).forEach(l=>{if(l.creator)tlPeople.add(l.creator);});});
+
   return [
     H_HEAD,
-    `<div class="m-header"><h1>📋 版本排期通知</h1><div class="subtitle">${now}</div></div>`,
-    ``,
+    `<div class="header"><h1>📋 版本排期通知</h1><div class="sub"><time>${now}</time><span>·</span>${targetVers.map(v=>v.name).join('、')} 已定版</div>`,
+    `<div class="metrics"><div class="metric"><div class="value">${targetVers.length}</div><div class="label">定版</div></div><div class="metric"><div class="value">${tlLeavesAll}</div><div class="label">叶子任务</div></div><div class="metric"><div class="value">${tlPeople.size}</div><div class="label">参与人</div></div><div class="metric"><div class="value">${tlDoneAll}/${tlLeavesAll}</div><div class="label">完成</div></div></div></div>`,
+    `<div class="section"><div class="section-title">版本排期总览</div><div class="section-summary">${targetVers.length} 个版本已定版，SRD 完成率 ${tlLeavesAll>0?Math.round(tlDoneAll/tlLeavesAll*100):0}%。${targetVers.filter(v=>v.workflow_nodes.find(n=>n.name==='门禁评审'&&n.status===2)).map(v=>v.name).join('、')}${targetVers.filter(v=>v.workflow_nodes.find(n=>n.name==='门禁评审'&&n.status===2)).length>0?' 处于门禁评审阶段，需关注。':''}</div></div>`,
     ...parts,
     H_TAIL,
-  ].join('\n')
-    .replace(/^## (.+)$/gm, '</div><div class="card"><h2>$1</h2>')
-    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-    .replace('</div><div class="card">', '<div class="card">');
+  ].join('\n');
 }
 
 // ==================== 能力 3: 进度偏离 ====================
@@ -792,44 +794,23 @@ export async function checkProgressDeviation(nodeDurations: Record<string, numbe
       `| 小 | - | - | - |`,
     ].join('\n');
 
+    const undoneItems = leaves.filter(l=>!l.completed).map(l=>{const mods=l.moduleLabels.length>0?l.moduleLabels.join('·'):'未分配';const sd=srdMap.get(Number(l.id));const cn=sd?.workflow_nodes?.find(n=>n.status===2);return`<li><span class="issue-dot ${cn?'dot-amber':'dot-red'}"></span><strong>${l.name}</strong> — ${cn?.name||'待开发'} · ${mods} · ${uname(l.creator)}</li>`;}).join('');
+    const sev=deviation<=-50?'紧急':deviation<=-30?'严重':'关注';
+
     return [
       H_HEAD,
-      `<div class="m-header"><h1>⚠️ 版本 ${v.name} 进度偏离报告</h1><div class="subtitle">${nowStr}</div>`,
-      `<div class="kpi-row">`,
-      `<div class="kpi"><div class="metric ${deviation<=-15?'red':''}">${deviation}%</div><div class="label">进度偏离</div></div>`,
-      `<div class="kpi"><div class="metric">${Math.round(actual)}%</div><div class="label">实际进度</div></div>`,
-      `<div class="kpi"><div class="metric">${Math.round(expected)}%</div><div class="label">预期进度</div></div>`,
-      `</div></div>`,
-      ``,
-      `## 进度对比`,
-      ``,
-      `| 指标 | 值 |`,
-      `|------|-----|`,
-      `| 当前节点 | ${activeNode.name}（第 ${Math.round(elapsed)} 天 / 计划 ${plannedDays} 天） |`,
-      `| 预期进度 | ${Math.round(expected)}% |`,
-      `| 实际进度 | ${Math.round(actual)}%（${completed}/${leaves.length} 叶子任务） |`,
-      `| 偏离 | ${deviation}% ${tag} |`,
-      ``,
-      `## 进度可视化`,
-      '```',
-      progressBar,
-      '```',
-      ``,
-      `## 风险矩阵`,
-      riskMatrix,
-      ``,
-      `## 未完成叶子任务`,
-      ...(undoneLeaves ? undoneLeaves.split('\n') : ['（无）']),
-      ``,
-      `## 建议`,
-      `1. 优先排查阻塞任务，协调模块负责人查因`,
-      `2. 关注未分配模块的任务，尽快指定负责人`,
-      `3. 按当前速率，预计延期 ${Math.max(1, Math.round(Math.abs(deviation) * plannedDays / 100))} 天`,
+      `<div class="header" style="background:linear-gradient(135deg,#7F1D1D 0%,#991B1B 50%,#DC2626 100%)"><h1>⚠️ 版本 ${v.name} 进度偏离报告</h1><div class="sub"><time>${nowStr}</time></div>`,
+      `<div class="metrics"><div class="metric"><div class="value" style="color:#FCA5A5">${Math.round(expected)}%</div><div class="label">预期进度</div></div><div class="metric"><div class="value" style="color:#FCA5A5">${Math.round(actual)}%</div><div class="label">实际进度</div></div><div class="metric"><div class="value" style="color:#FCA5A5">${deviation}%</div><div class="label">偏离</div></div></div></div>`,
+      `<div class="section"><div class="section-title">进度对比</div><div class="section-summary">${v.name} 当前 ${activeNode.name} 已 ${Math.round(elapsed)} 天（计划 ${plannedDays} 天），偏离 ${deviation}%，${tag}。</div><div class="card">`,
+      `<div style="font-size:14px;font-weight:600;margin-bottom:12px">进度条</div>`,
+      `<div class="progress-row"><span class="progress-label">预期</span><div class="progress-bar"><div class="progress-fill fill-blue" style="width:${Math.round(expected)}%"></div></div><span class="progress-val">${Math.round(expected)}%</span></div>`,
+      `<div class="progress-row"><span class="progress-label">实际</span><div class="progress-bar"><div class="progress-fill fill-red" style="width:${Math.round(actual)}%"></div></div><span class="progress-val">${Math.round(actual)}%</span></div>`,
+      `<div class="deviation-box"><div class="deviation-num">${deviation}%</div><div class="deviation-label">${sev}偏离 · 超期 ${Math.round(elapsed-plannedDays)} 天</div></div>`,
+      `<table style="margin-top:16px"><tr><td>当前节点</td><td><strong>${activeNode.name}</strong></td></tr><tr><td>计划时长</td><td>${plannedDays} 天</td></tr><tr><td>已过</td><td><strong style="color:#DC2626">${Math.round(elapsed)} 天</strong></td></tr><tr><td>SRD</td><td>${completed}/${leaves.length} 叶子</td></tr></table></div></div>`,
+      `<div class="section"><div class="section-title">阻塞分析</div><div class="section-summary">以下 ${leaves.filter(l=>!l.completed).length} 个叶子任务未完成。</div><div class="card"><ul class="issue-list">${undoneItems||'<li>无阻塞</li>'}</ul></div></div>`,
+      `<div class="section"><div class="section-title">建议措施</div><div class="card"><ol class="action-list"><li><strong>🔴 推动 ${activeNode.name}</strong> — 已超期 ${Math.round(elapsed-plannedDays)} 天，立即协调负责人推进。</li><li><strong>🟡 补充分配</strong> — 未归属任务尽快指定负责人。</li><li><strong>🟡 排查依赖</strong> — 确认无外部阻塞因素。</li></ol></div></div>`,
       H_TAIL,
-    ].join('\n')
-      .replace(/^## (.+)$/gm, '</div><div class="card"><h2>$1</h2>')
-      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-      .replace('</div><div class="card">', '<div class="card">');
+    ].join('\n');
   }
 
   return null; // 无偏离
