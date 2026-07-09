@@ -277,7 +277,6 @@ export async function runHeadcount(): Promise<string> {
   }
 
   // 版本节奏表格
-  const fmtDays = (d: number) => d < 1 ? '<1天' : `${d}天`;
   const rhythmTable = [
     `| 版本 | 已完成节点 | 当前节点 |`,
     `|------|-----------|---------|`,
@@ -316,32 +315,104 @@ export async function runHeadcount(): Promise<string> {
     treeLines.push('');
   }
 
+  // 综合健康度
+  const totalLeaves = [...versions].reduce((s, v) => {
+    const ids = (extractField(v as unknown as Record<string, unknown>, '跟版SRD') as number[]) || [];
+    return s + collectLeaves(ids.map(String), srdMap).length;
+  }, 0);
+  const totalCompleted = [...versions].reduce((s, v) => {
+    const ids = (extractField(v as unknown as Record<string, unknown>, '跟版SRD') as number[]) || [];
+    return s + collectLeaves(ids.map(String), srdMap).filter(l => l.completed).length;
+  }, 0);
+  const activeVers = versions.filter(v => v.workflow_nodes.find(n => n.status === 2));
+  const blockedVers = versions.filter(v => v.workflow_nodes.find(n => n.name === '门禁评审' && n.status === 2));
+  const riskCount = risks.filter(r => !extractField(r, '是否完成')).length;
+  const overallHealth = blockedVers.length > 0 || riskCount > 0 ? '🟡 中等风险' : totalCompleted === totalLeaves ? '🟢 健康' : '🟡 正常';
+
+  // 版本健康度仪表盘
+  const healthTable = [
+    `| 版本 | 进度 | 门禁 | 风险 | 人力 | 综合 |`,
+    `|------|:----:|:----:|:----:|:----:|:----:|`,
+    ...versions.map(v => {
+      const ids = (extractField(v as unknown as Record<string, unknown>, '跟版SRD') as number[]) || [];
+      const lvs = collectLeaves(ids.map(String), srdMap);
+      const done = lvs.filter(l => l.completed).length;
+      const total = lvs.length;
+      const inGate = v.workflow_nodes.find(n => n.name === '门禁评审' && n.status === 2);
+      const verRisk = risks.filter(r => String(extractField(r, '归属版本')) === v.id && !extractField(r, '是否完成'));
+      const creators = new Set(lvs.map(l => l.creator));
+      const hasUnassigned = lvs.some(l => !l.creator);
+      const p = total === 0 ? '⚪' : done === total ? '🟢' : done === 0 ? '🔴' : '🟡';
+      const g = inGate ? '🔴 阻塞' : '🟢 正常';
+      const r = verRisk.length > 0 ? '🔴' : '🟢';
+      const h = hasUnassigned ? '🔴 缺人' : creators.size === 0 ? '⚪' : '🟢';
+      const overall = (p.includes('🔴') ? 1 : 0) + (g.includes('🔴') ? 1 : 0) + (r.includes('🔴') ? 1 : 0) + (h.includes('🔴') ? 1 : 0);
+      const o = overall >= 2 ? '🔴 高风险' : overall >= 1 ? '🟡 关注' : '🟢 正常';
+      return `| ${v.name} | ${p} | ${g} | ${r} | ${h} | ${o} |`;
+    }),
+  ].join('\n');
+
+  // 人员负载条
+  const bar = (pct: number) => {
+    const filled = Math.round(pct / 10);
+    return '█'.repeat(filled) + '░'.repeat(10 - filled) + ` ${pct}%`;
+  };
+  const maxTasks = Math.max(1, ...[...allCreators.entries()].map(([, vs]) => [...moduleMap.values()].reduce((s, um) => s + (um.get([...allCreators.keys()].find(k => k === [...um.keys()][0]) || '')?.count || 0), 0)));
+  const loadLines: string[] = [];
+  for (const [uk, verSet] of allCreators) {
+    const totalT = [...moduleMap.values()].reduce((s, um) => s + (um.get(uk)?.count || 0), 0);
+    const pct = Math.round((totalT / maxTasks) * 100);
+    const tag = pct >= 80 ? '⚠️ 高负载' : pct >= 50 ? '🟡 适中' : '✅ 低负载';
+    loadLines.push(`- ${uname(uk)} ${bar(pct)} ${tag}`);
+  }
+
+  const fmtDays = (d: number) => d < 1 ? '<1天' : `${d}天`;
+
   return [
     `# 📊 版本人力盘点报告`,
     `> 生成时间：${now}`,
     ``,
+    `## 📊 执行摘要`,
+    `| 指标 | 值 |`,
+    `|------|-----|`,
+    `| 总版本数 | ${versions.length} 个 |`,
+    `| 进行中版本 | ${activeVers.length} 个（${activeVers.map(v=>v.name).join('、') || '无'}） |`,
+    `| 总叶子任务 | ${totalLeaves} 个（完成 ${totalCompleted}） |`,
+    `| 总涉及人数 | ${allCreators.size} 人 |`,
+    `| 高风险版本 | ${blockedVers.length} 个 |`,
+    `| NUDD 风险 | ${riskCount} 个未关闭 |`,
+    `| 总体健康度 | ${overallHealth} |`,
+    ``,
+    `## 版本健康度`,
+    healthTable,
+    ``,
+    `> 进度=叶子任务完成率 | 门禁=是否卡在门禁评审 | 风险=关联NUDD数量 | 人力=有无未分配任务`,
+    ``,
     `## 一、版本全景（${versions.length} 个版本）`,
     verTable,
     ``,
-    `## 二、人力分布（按模块）`,
-    ...(modLines.length > 0 ? modLines : ['（暂无人力数据）']),
-    `## 三、人员复用率`,
+    `## 二、人员负载`,
+    ...(loadLines.length > 0 ? loadLines : ['（暂无数据）']),
+    ``,
+    `## 三、人力分布（按模块）`,
+    ...(modLines.length > 0 ? modLines : ['（暂无数据）']),
+    `## 四、人员复用率`,
     ...(reuseLines.length > 0 ? reuseLines : ['（暂无数据）']),
     ``,
-    `## 四、版本节奏`,
+    `## 五、版本节奏`,
     rhythmTable,
     ``,
-    `## 五、门禁评审`,
+    `## 六、门禁评审`,
     `- 历史通过率：暂无数据`,
-    `- 当前进行中：${versions.filter(v => v.workflow_nodes.find(n => n.name === '门禁评审' && n.status === 2)).map(v=>v.name).join(', ') || '无'}`,
+    `- 当前进行中：${blockedVers.map(v=>v.name).join(', ') || '无'}`,
     ``,
-    `## 六、NUDD 风险管理`,
+    `## 七、NUDD 风险管理`,
     ...(verRiskLines.length > 0 ? verRiskLines : ['- 关联风险：0 个']),
     ``,
-    `## 七、SRD 层级树`,
+    `## 八、SRD 层级树`,
     ...(treeLines.length > 0 ? treeLines : ['（无 SRD 数据）']),
     ``,
-    `## 八、综合风险`,
+    `## 九、综合风险`,
     ...(reuseLines.filter(l => l.includes('⚠️')).length > 0 ? reuseLines.filter(l => l.includes('⚠️')) : ['- 暂无明显风险']),
   ].join('\n');
 }
@@ -387,9 +458,33 @@ export async function runScheduleNotice(versionId?: string): Promise<string> {
       return `- ${l.completed ? '✅' : '🟡'} ${l.name} [${mods}] — ${uname(l.creator)}`;
     }).join('\n');
 
+    // 时间线可视化
+    const nodeNames = allNodes.map(n => n.name);
+    const maxNameLen = Math.max(...nodeNames.map(n => n.length), 4);
+    const timelineWidth = 50;
+    const totalNodes = allNodes.length;
+    const doneNodes = allNodes.filter(n => n.status === 3).length;
+    const timeline = allNodes.map((n, i) => {
+      const marker = n.status === 3 ? '█' : n.status === 2 ? '▓' : '░';
+      const seg = marker.repeat(Math.floor(timelineWidth / totalNodes));
+      return seg;
+    }).join('');
+    const markers = allNodes.map((n, i) => {
+      const pos = Math.floor(timelineWidth / totalNodes) * i;
+      const icon = n.status === 3 ? '✅' : n.status === 2 ? '🔽' : '○';
+      return ' '.repeat(Math.max(0, pos - i * 3)) + icon + n.name.slice(0, 2);
+    }).filter(m => m.trim()).join('');
+
     parts.push(
       `## ${v.name} 已定版`,
       ``,
+      `### 版本时间线`,
+      `\`\`\``,
+      `${timeline}`,
+      `\`\`\``,
+      `▲ 当前节点：${allNodes.find(n => n.status === 2)?.name || '已完成'}`,
+      ``,
+      `### 节点排期`,
       `| 节点 | 状态 | 时间 |`,
       `|------|------|------|`,
       ...allNodes.map(n => {
@@ -397,6 +492,10 @@ export async function runScheduleNotice(versionId?: string): Promise<string> {
         if (n.status === 2 && n.actual_begin_time) return `| ${n.name} | 🔄 进行中 | ${n.actual_begin_time.slice(0, 10)} 起 |`;
         return `| ${n.name} | ⏳ 待开始 | - |`;
       }),
+      ``,
+      `### 进度统计`,
+      `- 已完成：${doneNodes}/${totalNodes} 节点`,
+      `- 完成率：${Math.round(doneNodes/totalNodes*100)}% ${'█'.repeat(Math.round(doneNodes/totalNodes*10))}${'░'.repeat(10-Math.round(doneNodes/totalNodes*10))}`,
       ``,
       `### SRD 叶子任务（${done}/${total} 完成）`,
       ...(srdLines ? srdLines.split('\n') : ['（无）']),
@@ -450,6 +549,21 @@ export async function checkProgressDeviation(nodeDurations: Record<string, numbe
     }).join('\n');
 
     const tag = deviation <= -30 ? '🔴 严重落后' : '🟡 偏慢';
+
+    // 进度条可视化
+    const expBar = Math.round(expected / 10);
+    const actBar = Math.round(actual / 10);
+    const progressBar = `预期 █${'█'.repeat(Math.max(0, expBar-1))}${'░'.repeat(10-expBar)} ${Math.round(expected)}%\n实际 █${'█'.repeat(Math.max(0, actBar-1))}${'░'.repeat(10-actBar)} ${Math.round(actual)}%`;
+
+    // 风险矩阵
+    const riskMatrix = [
+      `| 影响 \\ 概率 | 低 | 中 | 高 |`,
+      `|------------|----|----|-----|`,
+      `| 大 | - | - | - |`,
+      `| 中 | - | 进度偏离 ${Math.abs(deviation)}% | - |`,
+      `| 小 | - | - | - |`,
+    ].join('\n');
+
     return [
       `# ⚠️ 版本 ${v.name} 进度偏离报告`,
       `> 时间：${nowStr}`,
@@ -463,12 +577,21 @@ export async function checkProgressDeviation(nodeDurations: Record<string, numbe
       `| 实际进度 | ${Math.round(actual)}%（${completed}/${leaves.length} 叶子任务） |`,
       `| 偏离 | ${deviation}% ${tag} |`,
       ``,
+      `## 进度可视化`,
+      '```',
+      progressBar,
+      '```',
+      ``,
+      `## 风险矩阵`,
+      riskMatrix,
+      ``,
       `## 未完成叶子任务`,
       ...(undoneLeaves ? undoneLeaves.split('\n') : ['（无）']),
       ``,
       `## 建议`,
       `1. 优先排查阻塞任务，协调模块负责人查因`,
       `2. 关注未分配模块的任务，尽快指定负责人`,
+      `3. 按当前速率，预计延期 ${Math.max(1, Math.round(Math.abs(deviation) * plannedDays / 100))} 天`,
     ].join('\n');
   }
 
