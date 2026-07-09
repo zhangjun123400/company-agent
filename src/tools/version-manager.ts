@@ -155,22 +155,20 @@ export async function publishAsDocx(title: string, mdContent: string, chartPngFi
   const { getWikiAccessToken } = await import('../auth/wiki-token');
   const userToken = await getWikiAccessToken();
 
-  // 图片上传仍需 tenant_token（im/v1/images 不支持 user_token）
-  const tokenRes = await axios.post('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
-    app_id: (await import('../../src/config')).feishuApp.appId,
-    app_secret: (await import('../../src/config')).feishuApp.appSecret,
-  });
-  const imgH = { Authorization: `Bearer ${tokenRes.data.tenant_access_token}` };
-  const docH = userToken ? { Authorization: `Bearer ${userToken}` } : imgH;
+  const docH = userToken ? { Authorization: `Bearer ${userToken}` }
+    : { Authorization: `Bearer ${(await axios.post('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+        app_id: (await import('../../src/config')).feishuApp.appId,
+        app_secret: (await import('../../src/config')).feishuApp.appSecret,
+      })).data.tenant_access_token}` };
 
-  // 1. 上传图表 PNG → 获取 image_key（用 app token）
+  // 1. 上传图表 PNG → 获取 image_key（用 user token，图片归属用户本人）
   const imageBlocks: { marker: string; imageKey: string; width: number; height: number }[] = [];
   for (const pngPath of chartPngFiles) {
     try {
       const fd = new (require('form-data'))();
       fd.append('image_type', 'message');
       fd.append('image', fs.createReadStream(pngPath));
-      const r = await axios.post('https://open.feishu.cn/open-apis/im/v1/images', fd, { headers: { ...imgH, ...fd.getHeaders() } });
+      const r = await axios.post('https://open.feishu.cn/open-apis/im/v1/images', fd, { headers: { ...docH, ...fd.getHeaders() } });
       const ik = r.data?.data?.image_key;
       if (ik) {
         const base = path.basename(pngPath, '.png');
