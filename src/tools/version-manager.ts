@@ -349,10 +349,9 @@ export async function runHeadcount(): Promise<string> {
     modValues.push([...userMap.values()].reduce((s, u) => s + u.count, 0));
   }
 
-  // 生成模块负载柱状图
-  let chartB64: string | null = null;
+  // 生成模块负载图表（SVG文件，供上传后链接查看）
   if (modLabels.length > 0) {
-    chartB64 = genChartBase64('bar', { labels: modLabels, values: modValues, title: '模块负载分布', x_label: '模块', y_label: '任务数' }, 'bar_mod_load');
+    genChartBase64('bar', { labels: modLabels, values: modValues, title: '模块负载分布', x_label: '模块', y_label: '任务数' }, 'bar_mod_load');
   }
 
   // 综合健康度
@@ -422,7 +421,6 @@ export async function runHeadcount(): Promise<string> {
     ``,
     `> 进度=叶子任务完成率 | 门禁=是否卡在门禁评审 | 风险=关联NUDD数量 | 人力=有无未分配任务`,
     ``,
-    ...(chartB64 ? [``, `![模块负载分布](${chartB64})`, ``] : []),
     `## 一、版本全景（${versions.length} 个版本）`,
     verTable,
     ``,
