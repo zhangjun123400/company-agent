@@ -88,14 +88,19 @@ async function resolveUserName(userKey: string): Promise<string> {
 const SCRIPTS_DIR = path.resolve(__dirname, '../../scripts');
 const OUTPUT_DIR = path.resolve(__dirname, '../../output');
 
-function genChart(type: string, data: Record<string, unknown>, name: string): string | null {
+function genChartBase64(type: string, data: Record<string, unknown>, name: string): string | null {
   try {
     if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
     const dataFile = path.join(OUTPUT_DIR, `${name}.json`);
     const svgFile = path.join(OUTPUT_DIR, `${name}.svg`);
     fs.writeFileSync(dataFile, JSON.stringify(data), 'utf-8');
     execSync(`python "${SCRIPTS_DIR}/gen_charts.py" ${type} "${dataFile}" "${svgFile}"`, { timeout: 15000, stdio: 'pipe' });
-    if (fs.existsSync(svgFile)) { console.log(`[chart] ✅ ${name}.svg`); return svgFile; }
+    if (fs.existsSync(svgFile)) {
+      const svg = fs.readFileSync(svgFile, 'utf-8');
+      const b64 = Buffer.from(svg).toString('base64');
+      console.log(`[chart] ✅ ${name} (${b64.length} chars base64)`);
+      return `data:image/svg+xml;base64,${b64}`;
+    }
   } catch (e) { console.error(`[chart] ${name} 失败:`, (e as Error).message); }
   return null;
 }
@@ -345,8 +350,9 @@ export async function runHeadcount(): Promise<string> {
   }
 
   // 生成模块负载柱状图
+  let chartB64: string | null = null;
   if (modLabels.length > 0) {
-    genChart('bar', { labels: modLabels, values: modValues, title: '模块负载分布', x_label: '模块', y_label: '任务数' }, 'bar_mod_load');
+    chartB64 = genChartBase64('bar', { labels: modLabels, values: modValues, title: '模块负载分布', x_label: '模块', y_label: '任务数' }, 'bar_mod_load');
   }
 
   // 综合健康度
@@ -416,6 +422,7 @@ export async function runHeadcount(): Promise<string> {
     ``,
     `> 进度=叶子任务完成率 | 门禁=是否卡在门禁评审 | 风险=关联NUDD数量 | 人力=有无未分配任务`,
     ``,
+    ...(chartB64 ? [``, `![模块负载分布](${chartB64})`, ``] : []),
     `## 一、版本全景（${versions.length} 个版本）`,
     verTable,
     ``,
