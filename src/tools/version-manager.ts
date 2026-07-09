@@ -242,7 +242,7 @@ export async function runHeadcount(): Promise<string> {
       const done = leaves.filter(l => l.completed).length;
       const total = leaves.length;
       const status = active?.name || '已完成';
-      const icon = total === 0 ? '⚪' : done === total ? '🟢' : done === 0 ? '🔴' : '🟡';
+      const icon = total === 0 ? '⚪ 无数据' : done === total ? '🟢 正常' : done === 0 ? '🔴 全部未完成' : '🟡 部分完成';
       const progress = total === 0 ? '-' : `${done}/${total}`;
       return `| ${v.name} | ${status} | ${progress} | ${icon} |`;
     }),
@@ -303,7 +303,7 @@ export async function runHeadcount(): Promise<string> {
     const mods = ((extractField(risk, '模块') as Array<{ label: string }>) || []).map(m => m.label).join(',');
     const done = extractField(risk, '是否完成');
     const verName = versions.find(v => String(v.id) === String(verId))?.name || verId;
-    verRiskLines.push(`- ${done ? '✅' : '🔴'} ${risk.name}（${level}·${score}分）→ ${verName} | N=${nVal} U=${uVal} D1=${d1Val} D2=${d2Val} | 模块:${mods || '未指定'}`);
+    verRiskLines.push(`- ${done ? '✅ 已关闭' : '🔴 未关闭'} ${risk.name}（${level}·${score}分）→ ${verName} | N=${nVal} U=${uVal} D1=${d1Val} D2=${d2Val} | 模块:${mods || '未指定'}`);
   }
 
   // SRD 层级树
@@ -446,7 +446,7 @@ export async function checkProgressDeviation(nodeDurations: Record<string, numbe
       const mods = l.moduleLabels.length > 0 ? l.moduleLabels.join('·') : '未分配';
       const srdDetail = srdMap.get(Number(l.id));
       const currentNode = srdDetail?.workflow_nodes?.find(n => n.status === 2);
-      return `🔴 ${l.name}（${mods}·${uname(l.creator)}）— ${currentNode?.name || '待开发'}`;
+      return `- 🔴 未完成 ${l.name}（${mods}·${uname(l.creator)}）— 当前：${currentNode?.name || '待开发'}`;
     }).join('\n');
 
     const tag = deviation <= -30 ? '🔴 严重落后' : '🟡 偏慢';
