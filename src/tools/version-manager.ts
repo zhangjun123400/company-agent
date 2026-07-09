@@ -88,6 +88,47 @@ async function resolveUserName(userKey: string): Promise<string> {
 const SCRIPTS_DIR = path.resolve(__dirname, '../../scripts');
 const OUTPUT_DIR = path.resolve(__dirname, '../../output');
 
+/** MD文本 → 飞书 Docx 块数组 */
+function mdToDocxBlocks(md: string, imageBlocks: { marker: string; imageKey: string; width: number; height: number }[]): unknown[] {
+  const blocks: unknown[] = [];
+  const lines = md.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (!t) { blocks.push({ block_type: 2, text: { elements: [{ text_run: { content: '' } }] } }); continue; }
+
+    // 图片占位符: <!-- chart:name -->
+    const chartMatch = t.match(/^<!--\s*chart:(\S+)\s*-->/);
+    if (chartMatch) {
+      const img = imageBlocks.find(ib => ib.marker === chartMatch[1]);
+      if (img) { blocks.push({ block_type: 27, image: { image_key: img.imageKey, width: img.width, height: img.height } }); }
+      continue;
+    }
+
+    // 表格行
+    if (t.startsWith('|') && t.endsWith('|')) {
+      continue; // 跳过表格（Docx 表格太复杂，保留为 MD 表格块塞进 text）
+    }
+
+    // 标题
+    if (t.startsWith('### ')) { blocks.push({ block_type: 5, heading3: { elements: [{ text_run: { content: t.slice(4) } }], style: {} } }); continue; }
+    if (t.startsWith('## ')) { blocks.push({ block_type: 4, heading2: { elements: [{ text_run: { content: t.slice(3) } }], style: {} } }); continue; }
+    if (t.startsWith('# ')) { blocks.push({ block_type: 3, heading1: { elements: [{ text_run: { content: t.slice(2) } }], style: {} } }); continue; }
+
+    // 分隔线
+    if (t === '---') { continue; }
+
+    // 列表项
+    if (t.startsWith('- ')) {
+      blocks.push({ block_type: 2, text: { elements: [{ text_run: { content: '  ' + t } }] } });
+      continue;
+    }
+
+    // 普通文本
+    blocks.push({ block_type: 2, text: { elements: [{ text_run: { content: t } }] } });
+  }
+  return blocks;
+}
+
 async function genChartImage(type: string, data: Record<string, unknown>, name: string): Promise<string | null> {
   try {
     if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
@@ -105,6 +146,62 @@ async function genChartImage(type: string, data: Record<string, unknown>, name: 
     return pngFile; // 返回 PNG 文件路径，由上传层处理
   } catch (e) { console.error(`[chart] ${name} 失败:`, (e as Error).message); }
   return null;
+}
+
+// ==================== Docx 发布 ====================
+
+export async function publishAsDocx(title: string, mdContent: string, chartPngFiles: string[]): Promise<string> {
+  const tokenRes = await axios.post('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+    app_id: (await import('../../src/config')).feishuApp.appId,
+    app_secret: (await import('../../src/config')).feishuApp.appSecret,
+  });
+  const H = { Authorization: `Bearer ${tokenRes.data.tenant_access_token}` };
+
+  // 1. 上传图表 PNG → 获取 image_key
+  const imageBlocks: { marker: string; imageKey: string; width: number; height: number }[] = [];
+  for (const pngPath of chartPngFiles) {
+    try {
+      const fd = new (require('form-data'))();
+      fd.append('image_type', 'message');
+      fd.append('image', fs.createReadStream(pngPath));
+      const r = await axios.post('https://open.feishu.cn/open-apis/im/v1/images', fd, { headers: { ...H, ...fd.getHeaders() } });
+      const ik = r.data?.data?.image_key;
+      if (ik) {
+        const base = path.basename(pngPath, '.png');
+        imageBlocks.push({ marker: base, imageKey: ik, width: 600, height: 350 });
+        console.log(`[docx] 图片 ${base} → ${ik}`);
+      }
+    } catch (e) { /* skip */ }
+  }
+
+  // 2. 创建 Docx 文档
+  const docRes = await axios.post('https://open.feishu.cn/open-apis/docx/v1/documents', { title }, { headers: H });
+  const docId: string = docRes.data.data.document.document_id;
+
+  // 3. 将 MD 内容转为 Docx 块 + 嵌入图片（每块内容截断 2500 字符防止 API 报错）
+  const blocks = mdToDocxBlocks(mdContent, imageBlocks).map((b: any) => {
+    if (b.text?.elements?.[0]?.text_run?.content?.length > 2500) {
+      b.text.elements[0].text_run.content = b.text.elements[0].text_run.content.slice(0, 2500) + '...(截断)';
+    }
+    return b;
+  });
+
+  // 4. 分批写入（每批最多 50 块）
+  for (let i = 0; i < blocks.length; i += 50) {
+    await axios.post(`https://open.feishu.cn/open-apis/docx/v1/documents/${docId}/blocks/${docId}/children`,
+      { children: blocks.slice(i, i + 50) }, { headers: H }).catch(() => {});
+    if (i + 50 < blocks.length) await new Promise(r => setTimeout(r, 300));
+  }
+
+  // 5. 授权给目标用户
+  const targetOpenId = 'ou_8de837db0c63b31eaebbb465c18c9ea8';
+  await axios.post(`https://open.feishu.cn/open-apis/drive/v1/permissions/${docId}/members?type=docx`,
+    { member_type: 'openid', member_id: targetOpenId, perm: 'full_access' },
+    { headers: H }).catch(() => {});
+
+  const docUrl = `https://p1iscu6mj28.feishu.cn/docx/${docId}`;
+  console.log(`[docx] ✅ ${title} → ${docUrl}`);
+  return docUrl;
 }
 
 // ==================== 数据获取 ====================
@@ -423,6 +520,8 @@ export async function runHeadcount(): Promise<string> {
     healthTable,
     ``,
     `> 进度=叶子任务完成率 | 门禁=是否卡在门禁评审 | 风险=关联NUDD数量 | 人力=有无未分配任务`,
+    ``,
+    `<!-- chart:bar_mod_load -->`,
     ``,
     `## 一、版本全景（${versions.length} 个版本）`,
     verTable,
