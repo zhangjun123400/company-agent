@@ -113,18 +113,29 @@ async function loadAllData(): Promise<{ versions: VersionItem[]; srdMap: Map<num
 
 function collectLeaves(srdIds: string[], srdMap: Map<number, SRDItem>): LeafTask[] {
   const leaves: LeafTask[] = [];
-  for (const id of srdIds) {
+  const seen = new Set<string>();
+  // 只从顶级 SRD 开始递归（parentId 不在 srdIds 中，或 parentId 为空）
+  const topIds = srdIds.filter(id => {
     const srd = srdMap.get(Number(id));
-    if (!srd) continue;
-    const children = [...srdMap.values()].filter(s => s.parentId === id);
+    if (!srd) return false;
+    if (!srd.parentId || srd.parentId === '') return true;
+    return !srdIds.some(sid => String(sid) === String(srd.parentId));
+  });
+
+  function walk(id: string, chain: string): void {
+    if (seen.has(id)) return;
+    seen.add(id);
+    const srd = srdMap.get(Number(id));
+    if (!srd) return;
+    const children = [...srdMap.values()].filter(s => s.parentId === id && srdIds.includes(s.id));
     if (children.length === 0) {
       const completed = srd.workflow_nodes?.find(n => n.name === '已完成')?.status === 3;
-      leaves.push({ id: srd.id, name: srd.name, creator: srd.creator, moduleLabels: srd.moduleLabels, completed, parentChain: srd.name });
+      leaves.push({ id: srd.id, name: srd.name, creator: srd.creator, moduleLabels: srd.moduleLabels, completed, parentChain: chain + srd.name });
     } else {
-      const subLeaves = collectLeaves(children.map(c => c.id), srdMap);
-      leaves.push(...subLeaves.map(l => ({ ...l, parentChain: srd.name + ' → ' + l.parentChain })));
+      for (const c of children) walk(c.id, chain + srd.name + ' → ');
     }
   }
+  for (const id of topIds) walk(id, '');
   return leaves;
 }
 
