@@ -7,7 +7,10 @@
  *   checkProgressDeviation() — 进度偏离检测
  */
 import axios from 'axios';
+import { execSync } from 'child_process';
 import { projectConfig } from '../../src/config';
+import path from 'path';
+import fs from 'fs';
 
 const TARGET_OPEN_ID = 'ou_8de837db0c63b31eaebbb465c18c9ea8';
 const VERSION_TK = '6a41e22f1dcaa1da30c0ca94';
@@ -78,6 +81,23 @@ async function resolveUserName(userKey: string): Promise<string> {
     if (name) { userNameCache[userKey] = name; return name; }
   } catch { /* ignore */ }
   return userKey.slice(-8); // fallback: 末 8 位
+}
+
+// ==================== 图表生成 ====================
+
+const SCRIPTS_DIR = path.resolve(__dirname, '../../scripts');
+const OUTPUT_DIR = path.resolve(__dirname, '../../output');
+
+function genChart(type: string, data: Record<string, unknown>, name: string): string | null {
+  try {
+    if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+    const dataFile = path.join(OUTPUT_DIR, `${name}.json`);
+    const svgFile = path.join(OUTPUT_DIR, `${name}.svg`);
+    fs.writeFileSync(dataFile, JSON.stringify(data), 'utf-8');
+    execSync(`python "${SCRIPTS_DIR}/gen_charts.py" ${type} "${dataFile}" "${svgFile}"`, { timeout: 15000, stdio: 'pipe' });
+    if (fs.existsSync(svgFile)) { console.log(`[chart] ✅ ${name}.svg`); return svgFile; }
+  } catch (e) { console.error(`[chart] ${name} 失败:`, (e as Error).message); }
+  return null;
 }
 
 // ==================== 数据获取 ====================
@@ -315,6 +335,18 @@ export async function runHeadcount(): Promise<string> {
     treeLines.push(`### ${v.name}`);
     treeLines.push(buildSRDTree(srdIds.map(String), srdMap));
     treeLines.push('');
+  }
+
+  // 收集模块数据用于图表
+  const modLabels: string[] = []; const modValues: number[] = [];
+  for (const [mod, userMap] of moduleMap) {
+    modLabels.push(mod);
+    modValues.push([...userMap.values()].reduce((s, u) => s + u.count, 0));
+  }
+
+  // 生成模块负载柱状图
+  if (modLabels.length > 0) {
+    genChart('bar', { labels: modLabels, values: modValues, title: '模块负载分布', x_label: '模块', y_label: '任务数' }, 'bar_mod_load');
   }
 
   // 综合健康度
