@@ -150,57 +150,43 @@ async function genChartImage(type: string, data: Record<string, unknown>, name: 
 
 // ==================== Docx 发布 ====================
 
-export async function publishAsDocx(title: string, mdContent: string, chartPngFiles: string[]): Promise<string> {
-  // 优先用用户自己的 access_token（文档归属用户，无需额外授权）
-  const { getWikiAccessToken } = await import('../auth/wiki-token');
-  const userToken = await getWikiAccessToken();
-
-  const docH = userToken ? { Authorization: `Bearer ${userToken}` }
-    : { Authorization: `Bearer ${(await axios.post('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
-        app_id: (await import('../../src/config')).feishuApp.appId,
-        app_secret: (await import('../../src/config')).feishuApp.appSecret,
-      })).data.tenant_access_token}` };
-
-  // 1. 上传图表 PNG → 获取 image_key（用 user token，图片归属用户本人）
-  const imageBlocks: { marker: string; imageKey: string; width: number; height: number }[] = [];
-  for (const pngPath of chartPngFiles) {
-    try {
-      const fd = new (require('form-data'))();
-      fd.append('image_type', 'message');
-      fd.append('image', fs.createReadStream(pngPath));
-      const r = await axios.post('https://open.feishu.cn/open-apis/im/v1/images', fd, { headers: { ...docH, ...fd.getHeaders() } });
-      const ik = r.data?.data?.image_key;
-      if (ik) {
-        const base = path.basename(pngPath, '.png');
-        imageBlocks.push({ marker: base, imageKey: ik, width: 600, height: 350 });
-        console.log(`[docx] 图片 ${base} → ${ik}`);
-      }
-    } catch (e) { /* skip */ }
-  }
-
-  // 2. 创建 Docx 文档（用用户 token，文档归属用户）
-  const docRes = await axios.post('https://open.feishu.cn/open-apis/docx/v1/documents', { title }, { headers: docH });
-  const docId: string = docRes.data.data.document.document_id;
-
-  // 3. 将 MD 内容转为 Docx 块 + 嵌入图片
-  const blocks = mdToDocxBlocks(mdContent, imageBlocks).map((b: any) => {
-    if (b.text?.elements?.[0]?.text_run?.content?.length > 2500) {
-      b.text.elements[0].text_run.content = b.text.elements[0].text_run.content.slice(0, 2500) + '...(截断)';
-    }
-    return b;
+export async function publishAsHtml(title: string, htmlContent: string): Promise<string> {
+  const tokenRes = await axios.post('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+    app_id: (await import('../../src/config')).feishuApp.appId,
+    app_secret: (await import('../../src/config')).feishuApp.appSecret,
   });
+  const H = { Authorization: `Bearer ${tokenRes.data.tenant_access_token}` };
+  const targetOpenId = 'ou_8de837db0c63b31eaebbb465c18c9ea8';
 
-  // 4. 分批写入（用用户 token）
-  for (let i = 0; i < blocks.length; i += 50) {
-    await axios.post(`https://open.feishu.cn/open-apis/docx/v1/documents/${docId}/blocks/${docId}/children`,
-      { children: blocks.slice(i, i + 50) }, { headers: docH }).catch(() => {});
-    if (i + 50 < blocks.length) await new Promise(r => setTimeout(r, 300));
+  const fn = `${title.replace(/[\\/:*?"<>|]/g, '_')}.html`;
+  const fp = path.join(OUTPUT_DIR, fn);
+  fs.writeFileSync(fp, htmlContent, 'utf-8');
+
+  const fd = new (require('form-data'))();
+  fd.append('file_name', fn); fd.append('parent_type', 'explorer'); fd.append('parent_node', '');
+  fd.append('size', String(fs.statSync(fp).size)); fd.append('file', fs.createReadStream(fp));
+  const u = await axios.post('https://open.feishu.cn/open-apis/drive/v1/files/upload_all', fd, {
+    headers: { ...H, ...fd.getHeaders() }, maxContentLength: Infinity, maxBodyLength: Infinity,
+  });
+  const ft = u.data.data?.file_token;
+  if (ft) {
+    await axios.post(`https://open.feishu.cn/open-apis/drive/v1/permissions/${ft}/members?type=file`,
+      { member_type: 'openid', member_id: targetOpenId, perm: 'full_access' }, { headers: H }).catch(() => {});
+    const url = `https://p1iscu6mj28.feishu.cn/file/${ft}`;
+    console.log(`[html] ✅ ${title} → ${url}`);
+    return url;
   }
-
-  const docUrl = `https://p1iscu6mj28.feishu.cn/docx/${docId}`;
-  console.log(`[docx] ✅ ${title} → ${docUrl}`);
-  return docUrl;
+  return 'upload_failed';
 }
+
+// ==================== HTML 模板 ====================
+
+const CSS = `*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f0f2f5;padding:24px 16px;color:#1f2937;line-height:1.6}.container{max-width:960px;margin:0 auto}.card{background:#fff;border-radius:12px;padding:24px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.06)}h1{font-size:24px;color:#1a73e8;margin-bottom:4px}h2{font-size:17px;color:#2e7d32;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid #e8f5e9}h3{font-size:15px;color:#333;margin-bottom:8px}.kpi-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}.kpi{flex:1;min-width:140px;background:#f8fafc;border-radius:10px;padding:16px;text-align:center;border:1px solid #e5e7eb}.kpi .v{font-size:28px;font-weight:700;color:#1a73e8}.kpi .l{font-size:12px;color:#6b7280;margin-top:4px}table{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0}th{background:#f8fafc;color:#374151;font-weight:600;padding:8px 12px;text-align:left;border-bottom:2px solid #e5e7eb}td{padding:8px 12px;border-bottom:1px solid #f3f4f6}.chart-box{text-align:center;margin:20px 0;background:#fafcfd;border-radius:8px;padding:16px;border:1px solid #e5e7eb}.chart-box img{max-width:100%;height:auto}.gh{color:#2e7d32}.rh{color:#c62828}.oh{color:#ef6c00}.gy{color:#9ca3af}`;
+
+const H_HEAD = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><style>${CSS}</style></head><body><div class="container">`;
+const H_TAIL = `</div></body></html>`;
+
+const H_WRAP = (s: string) => H_HEAD + '\n' + s + '\n' + H_TAIL;
 
 // ==================== 数据获取 ====================
 
@@ -446,10 +432,10 @@ export async function runHeadcount(): Promise<string> {
     modValues.push([...userMap.values()].reduce((s, u) => s + u.count, 0));
   }
 
-  // 生成模块负载图表 PNG
-  let chartPngFile: string | null = null;
+  // 生成模块负载图表
   if (modLabels.length > 0) {
-    chartPngFile = await genChartImage('bar', { labels: modLabels, values: modValues, title: '模块负载分布', x_label: '模块', y_label: '任务数' }, 'bar_mod_load');
+    genChartImage('bar', { labels: modLabels, values: modValues, title: '模块负载分布', x_label: '模块', y_label: '任务数' }, 'bar_mod_load');
+    genChartImage('pie', { labels: modLabels, values: modValues, title: '模块占比' }, 'pie_mod_share');
   }
 
   // 综合健康度
@@ -499,9 +485,25 @@ export async function runHeadcount(): Promise<string> {
     loadLines.push(`- ${uname(uk)} ${bar(pct)} ${tag}`);
   }
 
+  const svgB64 = (name: string) => { try { const sf = path.join(OUTPUT_DIR, name); return fs.existsSync(sf) ? Buffer.from(fs.readFileSync(sf, 'utf-8')).toString('base64') : ''; } catch { return ''; } };
+  const barB64 = svgB64('bar_mod_load.svg');
+  const pieB64 = svgB64('pie_mod_share.svg');
   return [
-    `# 📊 版本人力盘点报告`,
-    `> 生成时间：${now}`,
+    H_HEAD,
+    `<h1>📊 版本人力盘点报告</h1><p style="color:#9ca3af;margin-bottom:20px">生成时间：${now}</p>`,
+    // KPI 卡片
+    `<div class="kpi-row">`,
+    `<div class="kpi"><div class="v">${versions.length}</div><div class="l">总版本数</div></div>`,
+    `<div class="kpi"><div class="v">${activeVers.length}</div><div class="l">进行中</div></div>`,
+    `<div class="kpi"><div class="v">${totalLeaves}</div><div class="l">叶子任务</div></div>`,
+    `<div class="kpi"><div class="v">${allCreators.size}</div><div class="l">涉及人数</div></div>`,
+    `<div class="kpi"><div class="v">${riskCount}</div><div class="l">NUDD 风险</div></div>`,
+    `</div>`,
+    // 图表区
+    (barB64 || pieB64 ? `<div class="card"><h2>📈 模块负载分析</h2>` : ''),
+    (barB64 ? `<div class="chart-box"><h3>任务数量分布</h3><img src="data:image/svg+xml;base64,${barB64}" style="max-width:100%" alt="柱状图"></div>` : ''),
+    (pieB64 ? `<div class="chart-box"><h3>模块占比</h3><img src="data:image/svg+xml;base64,${pieB64}" style="max-width:100%" alt="饼图"></div>` : ''),
+    (barB64 || pieB64 ? `</div>` : ''),
     ``,
     `## 📊 执行摘要`,
     `| 指标 | 值 |`,
@@ -547,7 +549,12 @@ export async function runHeadcount(): Promise<string> {
     ``,
     `## 九、综合风险`,
     ...(reuseLines.filter(l => l.includes('⚠️')).length > 0 ? reuseLines.filter(l => l.includes('⚠️')) : ['- 暂无明显风险']),
-  ].join('\n');
+    H_TAIL,
+  ].join('\n')
+    .replace(/^## (.+)$/gm, '</div><div class="card"><h2>$1</h2>')
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    // 清理多余的开头 card 结束标签
+    .replace('</div><div class="card">', '<div class="card">'); // 第一个不需要</div>
 }
 
 // ==================== 能力 2: 排期通知 ====================
@@ -637,13 +644,15 @@ export async function runScheduleNotice(versionId?: string): Promise<string> {
   }
 
   return [
-    `# 📋 版本排期通知`,
-    `> 生成时间：${now}`,
+    H_HEAD,
+    `<h1>📋 版本排期通知</h1><p style="color:#9ca3af;margin-bottom:20px">生成时间：${now}</p>`,
     ``,
     ...parts,
-    `---`,
-    `如有疑问请联系版本 PM。`,
-  ].join('\n');
+    H_TAIL,
+  ].join('\n')
+    .replace(/^## (.+)$/gm, '</div><div class="card"><h2>$1</h2>')
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace('</div><div class="card">', '<div class="card">');
 }
 
 // ==================== 能力 3: 进度偏离 ====================
@@ -698,8 +707,8 @@ export async function checkProgressDeviation(nodeDurations: Record<string, numbe
     ].join('\n');
 
     return [
-      `# ⚠️ 版本 ${v.name} 进度偏离报告`,
-      `> 时间：${nowStr}`,
+      H_HEAD,
+      `<h1>⚠️ 版本 ${v.name} 进度偏离报告</h1><p style="color:#9ca3af;margin-bottom:20px">时间：${nowStr}</p>`,
       ``,
       `## 进度对比`,
       ``,
@@ -725,7 +734,11 @@ export async function checkProgressDeviation(nodeDurations: Record<string, numbe
       `1. 优先排查阻塞任务，协调模块负责人查因`,
       `2. 关注未分配模块的任务，尽快指定负责人`,
       `3. 按当前速率，预计延期 ${Math.max(1, Math.round(Math.abs(deviation) * plannedDays / 100))} 天`,
-    ].join('\n');
+      H_TAIL,
+    ].join('\n')
+      .replace(/^## (.+)$/gm, '</div><div class="card"><h2>$1</h2>')
+      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+      .replace('</div><div class="card">', '<div class="card">');
   }
 
   return null; // 无偏离
