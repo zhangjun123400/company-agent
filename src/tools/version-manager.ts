@@ -88,19 +88,21 @@ async function resolveUserName(userKey: string): Promise<string> {
 const SCRIPTS_DIR = path.resolve(__dirname, '../../scripts');
 const OUTPUT_DIR = path.resolve(__dirname, '../../output');
 
-function genChartBase64(type: string, data: Record<string, unknown>, name: string): string | null {
+async function genChartImage(type: string, data: Record<string, unknown>, name: string): Promise<string | null> {
   try {
     if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
     const dataFile = path.join(OUTPUT_DIR, `${name}.json`);
     const svgFile = path.join(OUTPUT_DIR, `${name}.svg`);
+    const pngFile = path.join(OUTPUT_DIR, `${name}.png`);
     fs.writeFileSync(dataFile, JSON.stringify(data), 'utf-8');
     execSync(`python "${SCRIPTS_DIR}/gen_charts.py" ${type} "${dataFile}" "${svgFile}"`, { timeout: 15000, stdio: 'pipe' });
-    if (fs.existsSync(svgFile)) {
-      const svg = fs.readFileSync(svgFile, 'utf-8');
-      const b64 = Buffer.from(svg).toString('base64');
-      console.log(`[chart] ✅ ${name} (${b64.length} chars base64)`);
-      return `data:image/svg+xml;base64,${b64}`;
-    }
+    if (!fs.existsSync(svgFile)) return null;
+
+    // SVG → PNG via sharp
+    const sharp = require('sharp');
+    await sharp(svgFile).png().toFile(pngFile);
+    console.log(`[chart] ✅ ${name}.png`);
+    return pngFile; // 返回 PNG 文件路径，由上传层处理
   } catch (e) { console.error(`[chart] ${name} 失败:`, (e as Error).message); }
   return null;
 }
@@ -349,9 +351,10 @@ export async function runHeadcount(): Promise<string> {
     modValues.push([...userMap.values()].reduce((s, u) => s + u.count, 0));
   }
 
-  // 生成模块负载图表（SVG文件，供上传后链接查看）
+  // 生成模块负载图表 PNG
+  let chartPngFile: string | null = null;
   if (modLabels.length > 0) {
-    genChartBase64('bar', { labels: modLabels, values: modValues, title: '模块负载分布', x_label: '模块', y_label: '任务数' }, 'bar_mod_load');
+    chartPngFile = await genChartImage('bar', { labels: modLabels, values: modValues, title: '模块负载分布', x_label: '模块', y_label: '任务数' }, 'bar_mod_load');
   }
 
   // 综合健康度
