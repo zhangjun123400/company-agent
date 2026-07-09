@@ -181,12 +181,45 @@ export async function publishAsHtml(title: string, htmlContent: string): Promise
 
 // ==================== HTML 模板 ====================
 
-const CSS = `*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f0f2f5;padding:24px 16px;color:#1f2937;line-height:1.6}.container{max-width:960px;margin:0 auto}.card{background:#fff;border-radius:12px;padding:24px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.06)}h1{font-size:24px;color:#1a73e8;margin-bottom:4px}h2{font-size:17px;color:#2e7d32;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid #e8f5e9}h3{font-size:15px;color:#333;margin-bottom:8px}.kpi-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}.kpi{flex:1;min-width:140px;background:#f8fafc;border-radius:10px;padding:16px;text-align:center;border:1px solid #e5e7eb}.kpi .v{font-size:28px;font-weight:700;color:#1a73e8}.kpi .l{font-size:12px;color:#6b7280;margin-top:4px}table{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0}th{background:#f8fafc;color:#374151;font-weight:600;padding:8px 12px;text-align:left;border-bottom:2px solid #e5e7eb}td{padding:8px 12px;border-bottom:1px solid #f3f4f6}.chart-box{text-align:center;margin:20px 0;background:#fafcfd;border-radius:8px;padding:16px;border:1px solid #e5e7eb}.chart-box img{max-width:100%;height:auto}.gh{color:#2e7d32}.rh{color:#c62828}.oh{color:#ef6c00}.gy{color:#9ca3af}`;
+const CSS = `*{margin:0;padding:0;box-sizing:border-box}body{font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F8FAFC;padding:32px 20px;color:#1E293B;line-height:1.7}
+.container{max-width:1040px;margin:0 auto}
+.m-header{background:#FFF;border-radius:16px;padding:32px 36px;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,.04);border:1px solid #E2E8F0}
+.m-header h1{font-size:26px;font-weight:700;color:#0F172A;letter-spacing:-0.5px;margin-bottom:4px}
+.m-header .subtitle{font-size:14px;color:#94A3B8;margin-bottom:24px}
+.kpi-row{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:24px}
+.kpi{flex:1;min-width:150px;background:#F8FAFC;border-radius:14px;padding:20px 24px;text-align:center;border:1px solid #E2E8F0}
+.kpi .metric{font-size:42px;font-weight:700;color:#1D4ED8;letter-spacing:-1px;font-variant-numeric:tabular-nums;line-height:1.1}
+.kpi .metric.red{color:#DC2626}.kpi .metric.green{color:#059669}.kpi .metric.amber{color:#D97706}
+.kpi .label{font-size:12px;color:#64748B;margin-top:6px;text-transform:uppercase;letter-spacing:.5px;font-weight:500}
+.alerts{margin-bottom:0}
+.alert{padding:14px 20px;border-radius:10px;margin-bottom:10px;font-size:14px;line-height:1.5}
+.alert-red{background:#FEF2F2;border-left:4px solid #DC2626}.alert-red .title{color:#991B1B;font-weight:600}
+.alert-amber{background:#FFFBEB;border-left:4px solid #D97706}.alert-amber .title{color:#92400E;font-weight:600}
+.alert p{margin:4px 0 0;color:#475569;font-size:13px}
+.section{margin-bottom:28px}
+.section h2{font-size:18px;font-weight:600;color:#1E293B;margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid #E2E8F0;letter-spacing:-0.3px}
+.card{background:#FFF;border-radius:14px;padding:28px;margin-bottom:18px;box-shadow:0 1px 3px rgba(0,0,0,.04);border:1px solid #E2E8F0}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0}
+th{background:#F8FAFC;color:#475569;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:10px 14px;text-align:left;border-bottom:2px solid #E2E8F0}
+td{padding:10px 14px;border-bottom:1px solid #F1F5F9;color:#334155}
+tr:hover td{background:#FAFBFC}
+.bar-wrap{display:flex;align-items:center;gap:10px;margin:4px 0}
+.bar-name{font-size:13px;min-width:70px;color:#475569}
+.bar-bg{flex:1;background:#E2E8F0;border-radius:6px;height:10px;overflow:hidden}
+.bar-fg{height:10px;border-radius:6px}
+.chart-box{text-align:center;margin:20px 0;padding:16px}
+.chart-box img{max-width:100%;height:auto}
+.chart-box h3{font-size:15px;font-weight:600;color:#334155;margin-bottom:12px}
+.insight{font-size:13px;color:#64748B;margin-top:8px;line-height:1.6}
+.insight span{font-weight:600;color:#1E293B}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.dot-red{background:#DC2626}.dot-amber{background:#D97706}.dot-green{background:#059669}.dot-gray{background:#CBD5E1}
+.tag{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600}
+.tag-red{background:#FEE2E2;color:#991B1B}.tag-amber{background:#FEF3C7;color:#92400E}.tag-green{background:#DCFCE7;color:#065F46}.tag-gray{background:#F1F5F9;color:#475569}
+.rh{color:#DC2626}.ah{color:#D97706}.gh{color:#059669}.gy{color:#94A3B8}`;
 
 const H_HEAD = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><style>${CSS}</style></head><body><div class="container">`;
 const H_TAIL = `</div></body></html>`;
-
-const H_WRAP = (s: string) => H_HEAD + '\n' + s + '\n' + H_TAIL;
 
 // ==================== 数据获取 ====================
 
@@ -490,43 +523,34 @@ export async function runHeadcount(): Promise<string> {
   const pieB64 = svgB64('pie_mod_share.svg');
   return [
     H_HEAD,
-    `<h1>📊 版本人力盘点报告</h1><p style="color:#9ca3af;margin-bottom:20px">生成时间：${now}</p>`,
-    // KPI 卡片
+    // === 顶部卡片 ===
+    `<div class="m-header">`,
+    `<h1>📊 版本管理周报</h1><div class="subtitle">${now} · 自动生成</div>`,
     `<div class="kpi-row">`,
-    `<div class="kpi"><div class="v">${versions.length}</div><div class="l">总版本数</div></div>`,
-    `<div class="kpi"><div class="v">${activeVers.length}</div><div class="l">进行中</div></div>`,
-    `<div class="kpi"><div class="v">${totalLeaves}</div><div class="l">叶子任务</div></div>`,
-    `<div class="kpi"><div class="v">${allCreators.size}</div><div class="l">涉及人数</div></div>`,
-    `<div class="kpi"><div class="v">${riskCount}</div><div class="l">NUDD 风险</div></div>`,
+    `<div class="kpi"><div class="metric">${versions.length}</div><div class="label">总版本</div></div>`,
+    `<div class="kpi"><div class="metric ${activeVers.length>0?'amber':''}">${activeVers.length}</div><div class="label">进行中</div></div>`,
+    `<div class="kpi"><div class="metric">${allCreators.size}</div><div class="label">参与人数</div></div>`,
+    `<div class="kpi"><div class="metric ${riskCount>0?'red':''}">${riskCount}</div><div class="label">风险项</div></div>`,
     `</div>`,
-    // 图表区
-    (barB64 || pieB64 ? `<div class="card"><h2>📈 模块负载分析</h2>` : ''),
-    (barB64 ? `<div class="chart-box"><h3>任务数量分布</h3><img src="data:image/svg+xml;base64,${barB64}" style="max-width:100%" alt="柱状图"></div>` : ''),
-    (pieB64 ? `<div class="chart-box"><h3>模块占比</h3><img src="data:image/svg+xml;base64,${pieB64}" style="max-width:100%" alt="饼图"></div>` : ''),
-    (barB64 || pieB64 ? `</div>` : ''),
-    ``,
-    `## 📊 执行摘要`,
-    `| 指标 | 值 |`,
-    `|------|-----|`,
-    `| 总版本数 | ${versions.length} 个 |`,
-    `| 进行中版本 | ${activeVers.length} 个（${activeVers.map(v=>v.name).join('、') || '无'}） |`,
-    `| 总叶子任务 | ${totalLeaves} 个（完成 ${totalCompleted}） |`,
-    `| 总涉及人数 | ${allCreators.size} 人 |`,
-    `| 高风险版本 | ${blockedVers.length} 个 |`,
-    `| NUDD 风险 | ${riskCount} 个未关闭 |`,
-    `| 总体健康度 | ${overallHealth} |`,
-    ``,
-    `## 版本健康度`,
-    healthTable,
-    ``,
-    `> 进度=叶子任务完成率 | 门禁=是否卡在门禁评审 | 风险=关联NUDD数量 | 人力=有无未分配任务`,
-    ``,
-    `<!-- chart:bar_mod_load -->`,
-    ``,
-    `## 一、版本全景（${versions.length} 个版本）`,
-    verTable,
-    ``,
-    `## 二、人员负载`,
+    // 异常预警
+    ...(blockedVers.length>0 ? [`<div class="alerts"><div class="alert alert-red"><span class="title">🔴 门禁阻塞</span><p>${blockedVers.map(v=>v.name).join('、')} 卡在门禁评审，NUDD 风险未关闭。建议优先推动门禁，协调关闭风险项。</p></div></div>`] : []),
+    ...(allCreators.size>0 && [...allCreators.entries()].some(([,vs])=>vs.size>=2) ? [`<div class="alerts"><div class="alert alert-amber"><span class="title">🟡 人员复用</span><p>${[...allCreators.entries()].filter(([,vs])=>vs.size>=2).map(([uk,vs])=>uname(uk)+'跨'+vs.size+'版本').join('、')}。建议评估串行风险。</p></div></div>`] : []),
+    `</div>`,
+    // === 图表: 模块负载 ===
+    `<div class="section"><h2>📈 模块负载：${modLabels.length>0?modLabels.reduce((a,b,i)=>modValues[i]>modValues[modValues.indexOf(Math.max(...modValues))]?a:b,modLabels[0]):''} 任务最密集</h2>`,
+    `<div class="card">`,
+    (barB64 ? `<div class="chart-box"><img src="data:image/svg+xml;base64,${barB64}" style="max-width:100%"></div>` : ''),
+    `<div class="insight">▸ 共 <span>${modLabels.length}</span> 个模块，<span>${modValues.reduce((a,b)=>a+b,0)}</span> 个任务<br>▸ ${modLabels.filter((_,i)=>modValues[i]===0).length>0?'<span class="rh">'+modLabels.filter((_,i)=>modValues[i]===0).length+' 个模块无任务</span>':'所有模块均已分配'}</div>`,
+    `</div></div>`,
+    // === 版本健康度 ===
+    `<div class="section"><h2>🩺 版本健康度：${blockedVers.length>0?blockedVers.length+' 个版本需关注':riskCount>0?'有风险项待处理':'整体正常'}</h2>`,
+    `<div class="card">${healthTable}</div></div>`,
+    // === 版本全景 ===
+    `<div class="section"><h2>📋 版本全景</h2>`,
+    `<div class="card">${verTable}</div></div>`,
+    // === 人员负载 ===
+    `<div class="section"><h2>👥 人员负载</h2>`,
+    `<div class="card">`,
     ...(loadLines.length > 0 ? loadLines : ['（暂无数据）']),
     ``,
     `## 三、人力分布（按模块）`,

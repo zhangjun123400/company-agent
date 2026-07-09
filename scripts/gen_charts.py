@@ -1,30 +1,45 @@
-"""图表生成器 — 从 JSON 数据生成 SVG 图表，供版本管理报告使用"""
-import json, sys, os
-from charted import BarChart, PieChart, RadarChart, GanttChart
+"""图表生成器 — charted 全能力分发"""
+import json, sys
+from charted import BarChart, PieChart, RadarChart, GanttChart, LineChart, ColumnChart
 
-def gen_bar(data_file: str, output: str):
-    """柱状图: {labels: [...], values: [...], title: str, x_label: str, y_label: str}"""
+def gen_bar(data_file, output):
     d = json.load(open(data_file, encoding='utf-8'))
     c = BarChart(d['values'], labels=d.get('labels'), width=700, height=350,
-                 title=d.get('title', ''), x_label=d.get('x_label',''), y_label=d.get('y_label',''))
+                 title=d.get('title',''), x_label=d.get('x_label',''), y_label=d.get('y_label',''))
     open(output, 'w', encoding='utf-8').write(c.to_svg())
 
-def gen_pie(data_file: str, output: str):
-    """饼图: {labels: [...], values: [...], title: str}"""
+def gen_pie(data_file, output):
     d = json.load(open(data_file, encoding='utf-8'))
-    c = PieChart(d['values'], labels=d.get('labels'), width=600, height=400,
-                 title=d.get('title', ''))
+    c = PieChart(d['values'], labels=d.get('labels'), width=600, height=400, title=d.get('title',''))
     open(output, 'w', encoding='utf-8').write(c.to_svg())
 
-def gen_radar(data_file: str, output: str):
-    """雷达图: {labels: [...], series: [{name: str, values: [...]}], title: str}"""
+def gen_radar(data_file, output):
     d = json.load(open(data_file, encoding='utf-8'))
     c = RadarChart(d['series'][0]['values'], labels=d.get('labels'), width=500, height=400,
-                   title=d.get('title', ''), series_names=[s['name'] for s in d['series']])
+                   title=d.get('title',''), series_names=[s['name'] for s in d['series']])
     open(output, 'w', encoding='utf-8').write(c.to_svg())
 
+def gen_gantt(data_file, output):
+    """甘特图: {tasks: [{name, start, end, group}], title}"""
+    d = json.load(open(data_file, encoding='utf-8'))
+    c = GanttChart(d['tasks'], labels=[t['name'] for t in d['tasks']], width=800, height=400, title=d.get('title',''))
+    open(output, 'w', encoding='utf-8').write(c.to_svg())
+
+def gen_line(data_file, output):
+    """折线图: {x_data, series: [{name, values}], title}"""
+    d = json.load(open(data_file, encoding='utf-8'))
+    c = LineChart(d['series'][0]['values'], labels=d.get('x_data'), width=700, height=350,
+                  title=d.get('title',''), series_names=[s['name'] for s in d['series']])
+    open(output, 'w', encoding='utf-8').write(c.to_svg())
+
+def gen_column(data_file, output):
+    """柱状图-垂直版: {labels, values, title}"""
+    d = json.load(open(data_file, encoding='utf-8'))
+    c = ColumnChart(d['values'], labels=d.get('labels'), width=700, height=350, title=d.get('title',''))
+    open(output, 'w', encoding='utf-8').write(c.to_svg())
+
+DISPATCH = {'bar': gen_bar, 'pie': gen_pie, 'radar': gen_radar, 'gantt': gen_gantt, 'line': gen_line, 'column': gen_column}
+
 if __name__ == '__main__':
-    cmd = sys.argv[1]
-    data_file = sys.argv[2]
-    output = sys.argv[3]
-    {'bar': gen_bar, 'pie': gen_pie, 'radar': gen_radar}[cmd](data_file, output)
+    cmd = sys.argv[1]; data_file = sys.argv[2]; output = sys.argv[3]
+    DISPATCH[cmd](data_file, output)
