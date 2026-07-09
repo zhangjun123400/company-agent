@@ -313,7 +313,7 @@ class TimeWheel {
 
   private async handleVersionRule(rule: ReminderRule): Promise<void> {
     try {
-      const { runHeadcount, runScheduleNotice, checkProgressDeviation } = require('../../skills/version-manager/handler');
+      const { runHeadcount, runScheduleNotice, checkProgressDeviation } = require('../tools/version-manager');
       const { feishuApp } = await import('../config');
       const { default: axios } = await import('axios');
 
