@@ -162,18 +162,6 @@ export async function runHeadcount(): Promise<string> {
   const { versions, srdMap, risks } = await loadAllData();
   const now = new Date().toLocaleString('zh-CN');
 
-  // 版本全景
-  const verLines = versions.map(v => {
-    const active = v.workflow_nodes.find(n => n.status === 2);
-    const srdIds = (extractField(v as unknown as Record<string, unknown>, '跟版SRD') as number[]) || [];
-    const leaves = collectLeaves(srdIds.map(String), srdMap);
-    const done = leaves.filter(l => l.completed).length;
-    const total = leaves.length;
-    const status = active?.name || '已完成';
-    const icon = done === total && total > 0 ? '🟢' : done === 0 ? '🔴' : '🟡';
-    return ` ${v.name} | ${status} | ${icon} ${done}/${total} 叶子任务`;
-  }).join('\n');
-
   // 按模块人力分布
   const moduleMap = new Map<string, Map<string, { count: number; versions: Set<string> }>>();
   for (const v of versions) {
@@ -190,17 +178,6 @@ export async function runHeadcount(): Promise<string> {
       }
     }
   }
-  const modLines: string[] = [];
-  for (const [mod, userMap] of moduleMap) {
-    const totalTasks = [...userMap.values()].reduce((s, u) => s + u.count, 0);
-    const totalUsers = userMap.size;
-    modLines.push(`  ${mod}（${totalTasks}任务 / ${totalUsers}人）`);
-    for (const [uk, u] of userMap) {
-      const verTags = [...u.versions].join('+');
-      const load = u.count >= 3 ? '⚠️高负载' : '✅';
-      modLines.push(`    ${uk.slice(-8)}：${verTags} → ${u.count}任务 ${load}`);
-    }
-  }
 
   // 人员复用率
   const allCreators = new Map<string, Set<string>>();
@@ -212,27 +189,56 @@ export async function runHeadcount(): Promise<string> {
       allCreators.get(l.creator)!.add(v.name);
     }
   }
+
+  // 版本全景表格
+  const verTable = [
+    `| 版本 | 阶段 | 进度 | 状态 |`,
+    `|------|------|------|------|`,
+    ...versions.map(v => {
+      const active = v.workflow_nodes.find(n => n.status === 2);
+      const srdIds = (extractField(v as unknown as Record<string, unknown>, '跟版SRD') as number[]) || [];
+      const leaves = collectLeaves(srdIds.map(String), srdMap);
+      const done = leaves.filter(l => l.completed).length;
+      const total = leaves.length;
+      const status = active?.name || '已完成';
+      const icon = done === total && total > 0 ? '🟢' : done === 0 ? '🔴' : '🟡';
+      return `| ${v.name} | ${status} | ${done}/${total} | ${icon} |`;
+    }),
+  ].join('\n');
+
+  // 按模块人力分布
+  const modLines: string[] = [];
+  for (const [mod, userMap] of moduleMap) {
+    const totalTasks = [...userMap.values()].reduce((s, u) => s + u.count, 0);
+    modLines.push(`### ${mod}（${totalTasks}任务 / ${userMap.size}人）`);
+    for (const [uk, u] of userMap) {
+      const verTags = [...u.versions].join(' + ');
+      const load = u.count >= 3 ? '⚠️高负载' : '✅';
+      modLines.push(`- ${uk.slice(-8)}：${verTags} → ${u.count}任务 ${load}`);
+    }
+    modLines.push('');
+  }
+
+  // 人员复用率
   const reuseLines: string[] = [];
   for (const [uk, verSet] of allCreators) {
     const rate = Math.round((verSet.size / versions.length) * 100);
     const tag = rate >= 80 ? '⚠️串行风险' : '✅';
-    reuseLines.push(`  ${uk.slice(-8)}：跨 ${verSet.size}/${versions.length} 版本（${rate}%）${tag}`);
+    reuseLines.push(`- ${uk.slice(-8)}：跨 ${verSet.size}/${versions.length} 版本（${rate}%）${tag}`);
   }
 
-  // 版本节奏
-  const rhythmLines = versions.map(v => {
-    const nodes = v.workflow_nodes.filter(n => n.status === 3 && n.actual_begin_time && n.actual_finish_time);
-    const parts = nodes.map(n => {
-      const days = Math.round((new Date(n.actual_finish_time!).getTime() - new Date(n.actual_begin_time!).getTime()) / 86400000);
-      return `${n.name} ${days}天`;
-    });
-    const active = v.workflow_nodes.find(n => n.status === 2);
-    if (active && active.actual_begin_time) {
-      const elapsed = Math.round((Date.now() - new Date(active.actual_begin_time).getTime()) / 86400000);
-      parts.push(`${active.name} 第${elapsed}天`);
-    }
-    return ` ${v.name}：${parts.join(' → ')}`;
-  }).join('\n');
+  // 版本节奏表格
+  const rhythmTable = [
+    `| 版本 | 已完成节点 | 当前节点 |`,
+    `|------|-----------|---------|`,
+    ...versions.map(v => {
+      const doneNodes = v.workflow_nodes.filter(n => n.status === 3 && n.actual_begin_time && n.actual_finish_time)
+        .map(n => `${n.name} ${Math.round((new Date(n.actual_finish_time!).getTime() - new Date(n.actual_begin_time!).getTime()) / 86400000)}天`);
+      const active = v.workflow_nodes.find(n => n.status === 2);
+      const activeStr = active ? `${active.name} 第${Math.round((Date.now() - new Date(active.actual_begin_time!).getTime()) / 86400000)}天` : '已完成';
+      return `| ${v.name} | ${doneNodes.join(' → ') || '-'} | ${activeStr} |`;
+    }),
+  ].join('\n');
 
   // NUDD 风险
   const verRiskLines: string[] = [];
@@ -247,7 +253,7 @@ export async function runHeadcount(): Promise<string> {
     const mods = ((extractField(risk, '模块') as Array<{ label: string }>) || []).map(m => m.label).join(',');
     const done = extractField(risk, '是否完成');
     const verName = versions.find(v => String(v.id) === String(verId))?.name || verId;
-    verRiskLines.push(`  ${done ? '✅' : '🔴'} ${risk.name}（${level}·${score}分）→ ${verName} | N=${nVal} U=${uVal} D1=${d1Val} D2=${d2Val} | 模块:${mods || '未指定'}`);
+    verRiskLines.push(`- ${done ? '✅' : '🔴'} ${risk.name}（${level}·${score}分）→ ${verName} | N=${nVal} U=${uVal} D1=${d1Val} D2=${d2Val} | 模块:${mods || '未指定'}`);
   }
 
   // SRD 层级树
@@ -255,57 +261,37 @@ export async function runHeadcount(): Promise<string> {
   for (const v of versions) {
     const srdIds = (extractField(v as unknown as Record<string, unknown>, '跟版SRD') as number[]) || [];
     if (srdIds.length === 0) continue;
-    treeLines.push(` ${v.name}:`);
-    treeLines.push(buildSRDTree(srdIds.map(String), srdMap, '  '));
+    treeLines.push(`### ${v.name}`);
+    treeLines.push(buildSRDTree(srdIds.map(String), srdMap, ''));
   }
 
-  // 组装报告
-  const sep = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
   return [
-    `📊 智慧智能体 · 版本人力盘点报告`,
-    `生成时间：${now}`,
+    `# 📊 版本人力盘点报告`,
+    `> 生成时间：${now}`,
     ``,
-    `${sep}`,
-    `一、版本全景（${versions.length} 个版本在跑）`,
-    `${sep}`,
-    ...verLines,
+    `## 一、版本全景（${versions.length} 个版本）`,
+    verTable,
     ``,
-    `${sep}`,
-    `二、人力分布（按模块）`,
-    `${sep}`,
-    ...modLines,
+    `## 二、人力分布（按模块）`,
+    ...(modLines.length > 0 ? modLines : ['（暂无人力数据）']),
+    `## 三、人员复用率`,
+    ...(reuseLines.length > 0 ? reuseLines : ['（暂无数据）']),
     ``,
-    `${sep}`,
-    `三、人员复用率`,
-    `${sep}`,
-    ...reuseLines.length > 0 ? reuseLines : ['  （暂无人力数据）'],
+    `## 四、版本节奏`,
+    rhythmTable,
     ``,
-    `${sep}`,
-    `四、版本节奏进化`,
-    `${sep}`,
-    ...rhythmLines,
+    `## 五、门禁评审`,
+    `- 历史通过率：暂无数据`,
+    `- 当前进行中：${versions.filter(v => v.workflow_nodes.find(n => n.name === '门禁评审' && n.status === 2)).map(v=>v.name).join(', ') || '无'}`,
     ``,
-    `${sep}`,
-    `五、门禁评审`,
-    `${sep}`,
-    ` 历史通过率：N/A（尚无完成记录）`,
-    ` 当前进行中：${versions.filter(v => v.workflow_nodes.find(n => n.name === '门禁评审' && n.status === 2)).map(v=>v.name).join(', ') || '无'}`,
+    `## 六、NUDD 风险管理`,
+    ...(verRiskLines.length > 0 ? verRiskLines : ['- 关联风险：0 个']),
     ``,
-    `${sep}`,
-    `六、NUDD 风险管理`,
-    `${sep}`,
-    ...(verRiskLines.length > 0 ? verRiskLines : ['  关联风险：0 个']),
+    `## 七、SRD 层级树`,
+    ...(treeLines.length > 0 ? treeLines : ['（无 SRD 数据）']),
     ``,
-    `${sep}`,
-    `七、SRD 层级树（递归展开）`,
-    `${sep}`,
-    ...treeLines.length > 0 ? treeLines : ['  （无 SRD 数据）'],
-    ``,
-    `${sep}`,
-    `八、综合风险提示`,
-    `${sep}`,
-    ` 🔴 自动盘点，请关注以上标记的异常项`,
-    ` ⚠️ 高负载人员和未分配任务需尽快处理`,
+    `## 八、综合风险`,
+    ...(reuseLines.filter(l => l.includes('⚠️')).length > 0 ? reuseLines.filter(l => l.includes('⚠️')) : ['- 暂无明显风险']),
   ].join('\n');
 }
 
@@ -325,19 +311,18 @@ export async function runScheduleNotice(versionId?: string): Promise<string> {
 
   if (targetVers.length === 0) return '无已定版的版本。';
 
-  const sep = '━━━━━━━━━━━━━━━━━━━━━━';
   const parts: string[] = [];
   for (const v of targetVers) {
     const allNodes = v.workflow_nodes.filter(n => n.name !== '版本需求整理');
-    const nodeLines = allNodes.map(n => {
-      if (n.status === 3 && n.actual_finish_time) {
-        return `✅ ${n.name}  已完成  ${n.actual_finish_time.slice(0, 10)}`;
-      }
-      if (n.status === 2 && n.actual_begin_time) {
-        return `🔄 ${n.name}  进行中  ${n.actual_begin_time.slice(0, 10)} → 预计 待定`;
-      }
-      return `⏳ ${n.name}  待开始  预计 待定`;
-    }).join('\n');
+    const nodeTable = [
+      `| 节点 | 状态 | 时间 |`,
+      `|------|------|------|`,
+      ...allNodes.map(n => {
+        if (n.status === 3 && n.actual_finish_time) return `| ${n.name} | ✅ 已完成 | ${n.actual_finish_time.slice(0, 10)} |`;
+        if (n.status === 2 && n.actual_begin_time) return `| ${n.name} | 🔄 进行中 | ${n.actual_begin_time.slice(0, 10)} 起 |`;
+        return `| ${n.name} | ⏳ 待开始 | - |`;
+      }),
+    ].join('\n');
 
     const srdIds = (extractField(v as unknown as Record<string, unknown>, '跟版SRD') as number[]) || [];
     const leaves = collectLeaves(srdIds.map(String), srdMap);
@@ -345,30 +330,31 @@ export async function runScheduleNotice(versionId?: string): Promise<string> {
     const total = leaves.length;
     const srdLines = leaves.map(l => {
       const mods = l.moduleLabels.length > 0 ? l.moduleLabels.join('·') : '未分配';
-      return `  ${l.completed ? '✅' : '🟡'} ${l.name} [${mods}]`;
+      return `- ${l.completed ? '✅' : '🟡'} ${l.name} [${mods}]`;
     }).join('\n');
 
     parts.push(
-      `📋 版本 ${v.name} 已定版，进入开发阶段`,
+      `## ${v.name} 已定版`,
       ``,
-      `${sep}`,
-      `版本排期计划`,
-      `${sep}`,
-      nodeLines,
+      `| 节点 | 状态 | 时间 |`,
+      `|------|------|------|`,
+      ...allNodes.map(n => {
+        if (n.status === 3 && n.actual_finish_time) return `| ${n.name} | ✅ 已完成 | ${n.actual_finish_time.slice(0, 10)} |`;
+        if (n.status === 2 && n.actual_begin_time) return `| ${n.name} | 🔄 进行中 | ${n.actual_begin_time.slice(0, 10)} 起 |`;
+        return `| ${n.name} | ⏳ 待开始 | - |`;
+      }),
       ``,
-      `${sep}`,
-      `SRD 任务清单（叶子任务 ${done}/${total} 完成）`,
-      `${sep}`,
-      srdLines,
+      `### SRD 叶子任务（${done}/${total} 完成）`,
+      ...(srdLines ? srdLines.split('\n') : ['（无）']),
+      ``,
     );
   }
 
   return [
-    `📋 版本排期通知`,
-    `生成时间：${now}`,
+    `# 📋 版本排期通知`,
+    `> 生成时间：${now}`,
     ``,
     ...parts,
-    ``,
     `---`,
     `如有疑问请联系版本 PM。`,
   ].join('\n');
@@ -406,30 +392,25 @@ export async function checkProgressDeviation(nodeDurations: Record<string, numbe
     }).join('\n');
 
     const tag = deviation <= -30 ? '🔴 严重落后' : '🟡 偏慢';
-    const sep = '━━━━━━━━━━━━━━━━━━━━━━';
     return [
-      `⚠️ 版本 ${v.name} 进度偏离报告`,
-      `时间：${nowStr}`,
+      `# ⚠️ 版本 ${v.name} 进度偏离报告`,
+      `> 时间：${nowStr}`,
       ``,
-      `${sep}`,
-      `进度对比`,
-      `${sep}`,
-      `当前节点：${activeNode.name}（第 ${Math.round(elapsed)} 天 / 计划 ${plannedDays} 天）`,
-      `预期进度：${Math.round(expected)}%（按时间线性）`,
-      `实际进度：${Math.round(actual)}%（${completed}/${leaves.length} 叶子任务）`,
-      `偏离：${deviation}% ${tag}`,
+      `## 进度对比`,
       ``,
-      `${sep}`,
-      `未完成叶子任务`,
-      `${sep}`,
-      undoneLeaves || '  （无）',
+      `| 指标 | 值 |`,
+      `|------|-----|`,
+      `| 当前节点 | ${activeNode.name}（第 ${Math.round(elapsed)} 天 / 计划 ${plannedDays} 天） |`,
+      `| 预期进度 | ${Math.round(expected)}% |`,
+      `| 实际进度 | ${Math.round(actual)}%（${completed}/${leaves.length} 叶子任务） |`,
+      `| 偏离 | ${deviation}% ${tag} |`,
       ``,
-      `${sep}`,
-      `建议`,
-      `${sep}`,
-      `1. 优先排查阻塞任务，协调模块负责人`,
-      `2. 关注未分配任务，尽快指定负责人`,
-      `3. 按当前速率，预计延期 ${Math.max(1, Math.round(Math.abs(deviation) * plannedDays / 100))} 天`,
+      `## 未完成叶子任务`,
+      ...(undoneLeaves ? undoneLeaves.split('\n') : ['（无）']),
+      ``,
+      `## 建议`,
+      `1. 优先排查阻塞任务，协调模块负责人查因`,
+      `2. 关注未分配模块的任务，尽快指定负责人`,
     ].join('\n');
   }
 
