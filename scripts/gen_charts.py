@@ -23,8 +23,9 @@ def gen_gantt(data_file, output):
     """甘特图: {series: [[(s,e),...],...], labels: [...], title, series_names: [...]}"""
     d = json.load(open(data_file, encoding='utf-8'))
     series = [[tuple(p) for p in row] for row in d['series']]
-    c = GanttChart(series, labels=d.get('labels'), width=800, height=max(120, 40*len(d.get('labels',[]))),
-                   title=d.get('title',''), series_names=d.get('series_names'))
+    n = len(d.get('labels',[]))
+    c = GanttChart(series, labels=d.get('labels'), width=900, height=max(200, 50*n+80),
+                   title=d.get('title',''), series_names=d.get('series_names'), bar_height_ratio=0.7)
     open(output, 'w', encoding='utf-8').write(c.to_svg())
 
 def gen_line(data_file, output):
