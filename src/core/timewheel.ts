@@ -324,28 +324,32 @@ class TimeWheel {
       })();
       const H = { Authorization: `Bearer ${t}` };
 
+      // 解析目标用户
+      const targetOpenId = rule.remind.fallbackUserKey
+        ? await resolveUserKey(rule.remind.fallbackUserKey)
+        : null;
+
       if (rule.trigger.on === 'version_node_completed') {
         // 人力盘点 + 排期通知（一次性）
         const [headcount, schedule] = await Promise.all([runHeadcount(), runScheduleNotice()]);
-        // 上传为飞书文档
         for (const [title, content] of [['版本人力盘点报告', headcount], ['版本排期通知', schedule]]) {
           try {
-            const docUrl = await this.uploadAsDoc(title, content, H);
-            await this.notifyUser(rule, docUrl, title, H);
+            const docUrl = await this.uploadAsDoc(title, content, H, targetOpenId);
+            await this.notifyUser(docUrl, title, H, targetOpenId);
           } catch (e) { console.error(`[TimeWheel] ${title} 上传失败:`, e); }
         }
       } else if (rule.trigger.on === 'version_progress') {
         const nodeDurations = rule.nodeDurations || {};
         const report = await checkProgressDeviation(nodeDurations);
         if (report) {
-          const docUrl = await this.uploadAsDoc('版本进度偏离报告', report, H);
-          await this.notifyUser(rule, docUrl, '版本进度偏离报告', H);
+          const docUrl = await this.uploadAsDoc('版本进度偏离报告', report, H, targetOpenId);
+          await this.notifyUser(docUrl, '版本进度偏离报告', H, targetOpenId);
         }
       }
     } catch (e) { console.error('[TimeWheel] 版本规则执行失败:', e); }
   }
 
-  private async uploadAsDoc(title: string, content: string, H: Record<string, string>): Promise<string> {
+  private async uploadAsDoc(title: string, content: string, H: Record<string, string>, targetOpenId: string | null): Promise<string> {
     const fs = await import('fs'); const path = await import('path');
     const FormData = (await import('form-data')).default;
     const OUTPUT_DIR = path.resolve(__dirname, '../../output');
@@ -354,6 +358,8 @@ class TimeWheel {
     const filePath = path.join(OUTPUT_DIR, fileName);
     fs.writeFileSync(filePath, content, 'utf8');
     const axios = await import('axios');
+
+    let fileToken = '';
 
     try {
       const fd = new FormData();
@@ -365,22 +371,37 @@ class TimeWheel {
       const u = await axios.default.post('https://open.feishu.cn/open-apis/drive/v1/files/upload_all', fd, {
         headers: { ...H, ...fd.getHeaders() }, maxContentLength: Infinity, maxBodyLength: Infinity,
       });
-      const fileToken = u.data.data?.file_token;
-      if (fileToken) return `https://p1iscu6mj28.feishu.cn/file/${fileToken}`;
+      fileToken = u.data.data?.file_token;
+      if (fileToken) {
+        // 授予目标用户访问权限
+        if (targetOpenId) {
+          await axios.default.post(
+            `https://open.feishu.cn/open-apis/drive/v1/permissions/${fileToken}/members?type=file`,
+            { member_type: 'openid', member_id: targetOpenId, perm: 'full_access' },
+            { headers: H }
+          ).catch(() => {});
+        }
+        return `https://p1iscu6mj28.feishu.cn/file/${fileToken}`;
+      }
     } catch (e) { /* fallback */ }
 
     const cr = await axios.default.post('https://open.feishu.cn/open-apis/docx/v1/documents', { title }, { headers: H });
-    return `https://p1iscu6mj28.feishu.cn/docx/${cr.data.data.document.document_id}`;
+    const docId = cr.data.data.document.document_id;
+    if (docId && targetOpenId) {
+      await axios.default.post(
+        `https://open.feishu.cn/open-apis/drive/v1/permissions/${docId}/members?type=docx`,
+        { member_type: 'openid', member_id: targetOpenId, perm: 'full_access' },
+        { headers: H }
+      ).catch(() => {});
+    }
+    return `https://p1iscu6mj28.feishu.cn/docx/${docId}`;
   }
 
-  private async notifyUser(rule: ReminderRule, docUrl: string, title: string, H: Record<string, string>): Promise<void> {
-    const openId = rule.remind.fallbackUserKey
-      ? await resolveUserKey(rule.remind.fallbackUserKey)
-      : null;
-    if (!openId) { console.log(`[TimeWheel] 版本通知无接收人`); return; }
+  private async notifyUser(docUrl: string, title: string, H: Record<string, string>, targetOpenId: string | null): Promise<void> {
+    if (!targetOpenId) { console.log('[TimeWheel] 版本通知无接收人'); return; }
     const axios = await import('axios');
     await axios.default.post('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id', {
-      receive_id: openId, msg_type: 'interactive',
+      receive_id: targetOpenId, msg_type: 'interactive',
       content: JSON.stringify({
         config: { wide_screen_mode: true },
         header: { title: { content: `📄 ${title}`, tag: 'plain_text' }, template: 'blue' },
