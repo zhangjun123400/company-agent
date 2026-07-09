@@ -470,6 +470,20 @@ export async function runHeadcount(): Promise<string> {
     genChartImage('bar', { labels: modLabels, values: modValues, title: '模块负载分布', x_label: '模块', y_label: '任务数' }, 'bar_mod_load');
     genChartImage('pie', { labels: modLabels, values: modValues, title: '模块占比' }, 'pie_mod_share');
   }
+  // 甘特图：人员-模块分布
+  const ganttData: { labels: string[]; series: number[][][]; modNames: string[]; totalT: number } = { labels: [], series: [], modNames: modLabels, totalT: 0 };
+  for (const [uk] of allCreators) {
+    const row: number[][] = [];
+    let cum = 0;
+    for (const mod of modLabels) {
+      const count = moduleMap.get(mod)?.get(uk)?.count || 0;
+      if (count > 0) { row.push([cum, cum + count]); cum += count; ganttData.totalT += count; }
+    }
+    if (row.length > 0) { ganttData.labels.push(uname(uk)); ganttData.series.push(row); }
+  }
+  if (ganttData.series.length >= 1) {
+    genChartImage('gantt', { series: ganttData.series, labels: ganttData.labels, title: '人力分布·模块分配', series_names: ganttData.modNames }, 'gantt_people');
+  }
 
   // 综合健康度
   const totalLeaves = [...versions].reduce((s, v) => {
@@ -521,6 +535,7 @@ export async function runHeadcount(): Promise<string> {
   const svgB64 = (name: string) => { try { const sf = path.join(OUTPUT_DIR, name); return fs.existsSync(sf) ? Buffer.from(fs.readFileSync(sf, 'utf-8')).toString('base64') : ''; } catch { return ''; } };
   const barB64 = svgB64('bar_mod_load.svg');
   const pieB64 = svgB64('pie_mod_share.svg');
+  const ganttB64 = svgB64('gantt_people.svg');
   return [
     H_HEAD,
     // === 顶部卡片 ===
@@ -554,6 +569,7 @@ export async function runHeadcount(): Promise<string> {
     ...(loadLines.length > 0 ? loadLines : ['（暂无数据）']),
     ``,
     `## 三、人力分布（按模块）`,
+    (ganttB64 ? `<div class="card"><div class="chart-box"><img src="data:image/svg+xml;base64,${ganttB64}" style="max-width:100%"></div><div class="insight">▸ 每人一行，彩色段代表不同模块的任务分配<br>▸ 段越长 = 该模块任务越多</div></div>` : ''),
     ...(modLines.length > 0 ? modLines : ['（暂无数据）']),
     `## 四、人员复用率`,
     ...(reuseLines.length > 0 ? reuseLines : ['（暂无数据）']),

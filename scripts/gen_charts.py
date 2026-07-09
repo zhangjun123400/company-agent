@@ -20,9 +20,11 @@ def gen_radar(data_file, output):
     open(output, 'w', encoding='utf-8').write(c.to_svg())
 
 def gen_gantt(data_file, output):
-    """甘特图: {tasks: [{name, start, end, group}], title}"""
+    """甘特图: {series: [[(s,e),...],...], labels: [...], title, series_names: [...]}"""
     d = json.load(open(data_file, encoding='utf-8'))
-    c = GanttChart(d['tasks'], labels=[t['name'] for t in d['tasks']], width=800, height=400, title=d.get('title',''))
+    series = [[tuple(p) for p in row] for row in d['series']]
+    c = GanttChart(series, labels=d.get('labels'), width=800, height=max(120, 40*len(d.get('labels',[]))),
+                   title=d.get('title',''), series_names=d.get('series_names'))
     open(output, 'w', encoding='utf-8').write(c.to_svg())
 
 def gen_line(data_file, output):
