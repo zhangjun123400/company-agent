@@ -193,6 +193,8 @@ function buildSRDTree(srdIds: string[], srdMap: Map<number, SRDItem>): string {
 export async function runHeadcount(): Promise<string> {
   const { versions, srdMap, risks } = await loadAllData();
   const now = new Date().toLocaleString('zh-CN');
+  const fmtDays = (d: number) => d < 1 ? '<1天' : `${d}天`;
+  const bar = (pct: number) => { const filled = Math.round(pct / 10); return '█'.repeat(filled) + '░'.repeat(10 - filled) + ` ${pct}%`; };
 
   // 批量解析所有用户名
   const allUserKeys = new Set<string>();
@@ -353,10 +355,6 @@ export async function runHeadcount(): Promise<string> {
   ].join('\n');
 
   // 人员负载条
-  const bar = (pct: number) => {
-    const filled = Math.round(pct / 10);
-    return '█'.repeat(filled) + '░'.repeat(10 - filled) + ` ${pct}%`;
-  };
   const maxTasks = Math.max(1, ...[...allCreators.entries()].map(([, vs]) => [...moduleMap.values()].reduce((s, um) => s + (um.get([...allCreators.keys()].find(k => k === [...um.keys()][0]) || '')?.count || 0), 0)));
   const loadLines: string[] = [];
   for (const [uk, verSet] of allCreators) {
@@ -365,8 +363,6 @@ export async function runHeadcount(): Promise<string> {
     const tag = pct >= 80 ? '⚠️ 高负载' : pct >= 50 ? '🟡 适中' : '✅ 低负载';
     loadLines.push(`- ${uname(uk)} ${bar(pct)} ${tag}`);
   }
-
-  const fmtDays = (d: number) => d < 1 ? '<1天' : `${d}天`;
 
   return [
     `# 📊 版本人力盘点报告`,
