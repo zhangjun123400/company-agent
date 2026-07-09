@@ -61,6 +61,25 @@ async function apiFilter(typeKey: string, pageSize = 20): Promise<{ id: string; 
   return all;
 }
 
+// ==================== 用户名称解析 ====================
+
+const userNameCache: Record<string, string> = {};
+
+async function resolveUserName(userKey: string): Promise<string> {
+  if (!userKey || userKey === 'undefined') return '未分配';
+  if (userNameCache[userKey]) return userNameCache[userKey];
+  // 尝试 Meegle 用户查询
+  try {
+    const H = { 'X-Plugin-Token': await getToken(), 'X-User-Key': projectConfig.userKey };
+    const r = await axios.post('https://project.feishu.cn/open_api/user/query',
+      { user_keys: [userKey] }, { headers: H });
+    const u = (r.data.data || [])[0];
+    const name = u?.name?.zh_cn || u?.name_cn || u?.name?.default || u?.name || '';
+    if (name) { userNameCache[userKey] = name; return name; }
+  } catch { /* ignore */ }
+  return userKey.slice(-8); // fallback: 末 8 位
+}
+
 // ==================== 数据获取 ====================
 
 function extractField(item: Record<string, unknown>, name: string): unknown {
@@ -139,20 +158,33 @@ function collectLeaves(srdIds: string[], srdMap: Map<number, SRDItem>): LeafTask
   return leaves;
 }
 
-function buildSRDTree(srdIds: string[], srdMap: Map<number, SRDItem>, indent = ''): string {
-  const lines: string[] = [];
-  for (const id of srdIds) {
+function buildSRDTree(srdIds: string[], srdMap: Map<number, SRDItem>): string {
+  // 只展开顶级 SRD（parentId 不在 srdIds 中的）
+  const topIds = srdIds.filter(id => {
     const srd = srdMap.get(Number(id));
-    if (!srd) continue;
-    const children = [...srdMap.values()].filter(s => s.parentId === id);
-    const mods = srd.moduleLabels.length > 0 ? srd.moduleLabels.join('‖') : '未分配';
+    if (!srd) return false;
+    if (!srd.parentId || srd.parentId === '') return true;
+    return !srdIds.includes(srd.parentId);
+  });
+
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  function walk(id: string, depth: number): void {
+    if (seen.has(id)) return;
+    seen.add(id);
+    const srd = srdMap.get(Number(id));
+    if (!srd) return;
+    const prefix = '  '.repeat(depth) + '- ';
+    const mods = srd.moduleLabels.length > 0 ? srd.moduleLabels.join('·') : '未分配';
     const wfNode = srd.workflow_nodes?.find(n => n.name === '已完成');
-    const done = wfNode?.status === 3 ? '✅' : srd.isDone && children.length > 0 ? '⚠️标记完成但子任务未完成' : '🟡进行中';
-    lines.push(`${indent}${children.length > 0 ? '├─' : '└─'} ${srd.taskLevel}「${srd.name}」[${mods}] ${done}`);
-    if (children.length > 0) {
-      lines.push(buildSRDTree(children.map(c => c.id), srdMap, indent + '  '));
-    }
+    const done = wfNode?.status === 3 ? '✅ 已完成'
+      : srd.isDone ? '⚠️标记完成但子任务未完成'
+      : '🟡 进行中';
+    lines.push(`${prefix}${srd.taskLevel}「${srd.name}」[${mods}] ${done}`);
+    const children = [...srdMap.values()].filter(s => s.parentId === id && srdIds.includes(s.id));
+    for (const c of children) walk(c.id, depth + 1);
   }
+  for (const id of topIds) walk(id, 0);
   return lines.join('\n');
 }
 
@@ -161,6 +193,15 @@ function buildSRDTree(srdIds: string[], srdMap: Map<number, SRDItem>, indent = '
 export async function runHeadcount(): Promise<string> {
   const { versions, srdMap, risks } = await loadAllData();
   const now = new Date().toLocaleString('zh-CN');
+
+  // 批量解析所有用户名
+  const allUserKeys = new Set<string>();
+  for (const v of versions) {
+    const srdIds = (extractField(v as unknown as Record<string, unknown>, '跟版SRD') as number[]) || [];
+    const leaves = collectLeaves(srdIds.map(String), srdMap);
+    for (const l of leaves) { if (l.creator) allUserKeys.add(l.creator); }
+  }
+  for (const uk of allUserKeys) { await resolveUserName(uk); } // 预热缓存
 
   // 按模块人力分布
   const moduleMap = new Map<string, Map<string, { count: number; versions: Set<string> }>>();
@@ -201,10 +242,14 @@ export async function runHeadcount(): Promise<string> {
       const done = leaves.filter(l => l.completed).length;
       const total = leaves.length;
       const status = active?.name || '已完成';
-      const icon = done === total && total > 0 ? '🟢' : done === 0 ? '🔴' : '🟡';
-      return `| ${v.name} | ${status} | ${done}/${total} | ${icon} |`;
+      const icon = total === 0 ? '⚪' : done === total ? '🟢' : done === 0 ? '🔴' : '🟡';
+      const progress = total === 0 ? '-' : `${done}/${total}`;
+      return `| ${v.name} | ${status} | ${progress} | ${icon} |`;
     }),
   ].join('\n');
+
+  // 批量获取用户名
+  const uname = (uk: string) => userNameCache[uk] || uk.slice(-8);
 
   // 按模块人力分布
   const modLines: string[] = [];
@@ -214,7 +259,7 @@ export async function runHeadcount(): Promise<string> {
     for (const [uk, u] of userMap) {
       const verTags = [...u.versions].join(' + ');
       const load = u.count >= 3 ? '⚠️高负载' : '✅';
-      modLines.push(`- ${uk.slice(-8)}：${verTags} → ${u.count}任务 ${load}`);
+      modLines.push(`- ${uname(uk)}：${verTags} → ${u.count}任务 ${load}`);
     }
     modLines.push('');
   }
@@ -224,16 +269,21 @@ export async function runHeadcount(): Promise<string> {
   for (const [uk, verSet] of allCreators) {
     const rate = Math.round((verSet.size / versions.length) * 100);
     const tag = rate >= 80 ? '⚠️串行风险' : '✅';
-    reuseLines.push(`- ${uk.slice(-8)}：跨 ${verSet.size}/${versions.length} 版本（${rate}%）${tag}`);
+    reuseLines.push(`- ${uname(uk)}：跨 ${verSet.size}/${versions.length} 版本（${rate}%）${tag}`);
+  }
+  if (versions.length > 0) {
+    const avgReuse = Math.round([...allCreators.values()].reduce((s, vs) => s + vs.size, 0) / Math.max(1, allCreators.size));
+    reuseLines.push(``, `平均每人跨 ${avgReuse} 个版本，总涉及 ${allCreators.size} 人`);
   }
 
   // 版本节奏表格
+  const fmtDays = (d: number) => d < 1 ? '<1天' : `${d}天`;
   const rhythmTable = [
     `| 版本 | 已完成节点 | 当前节点 |`,
     `|------|-----------|---------|`,
     ...versions.map(v => {
       const doneNodes = v.workflow_nodes.filter(n => n.status === 3 && n.actual_begin_time && n.actual_finish_time)
-        .map(n => `${n.name} ${Math.round((new Date(n.actual_finish_time!).getTime() - new Date(n.actual_begin_time!).getTime()) / 86400000)}天`);
+        .map(n => `${n.name} ${fmtDays(Math.round((new Date(n.actual_finish_time!).getTime() - new Date(n.actual_begin_time!).getTime()) / 86400000))}`);
       const active = v.workflow_nodes.find(n => n.status === 2);
       const activeStr = active ? `${active.name} 第${Math.round((Date.now() - new Date(active.actual_begin_time!).getTime()) / 86400000)}天` : '已完成';
       return `| ${v.name} | ${doneNodes.join(' → ') || '-'} | ${activeStr} |`;
@@ -260,9 +310,10 @@ export async function runHeadcount(): Promise<string> {
   const treeLines: string[] = [];
   for (const v of versions) {
     const srdIds = (extractField(v as unknown as Record<string, unknown>, '跟版SRD') as number[]) || [];
-    if (srdIds.length === 0) continue;
+    if (srdIds.length === 0) { treeLines.push(`### ${v.name}`, '（无 SRD）', ''); continue; }
     treeLines.push(`### ${v.name}`);
-    treeLines.push(buildSRDTree(srdIds.map(String), srdMap, ''));
+    treeLines.push(buildSRDTree(srdIds.map(String), srdMap));
+    treeLines.push('');
   }
 
   return [
@@ -326,11 +377,14 @@ export async function runScheduleNotice(versionId?: string): Promise<string> {
 
     const srdIds = (extractField(v as unknown as Record<string, unknown>, '跟版SRD') as number[]) || [];
     const leaves = collectLeaves(srdIds.map(String), srdMap);
+    // 批量解析用户名
+    for (const l of leaves) { if (l.creator) await resolveUserName(l.creator); }
+    const uname = (uk: string) => userNameCache[uk] || uk.slice(-8);
     const done = leaves.filter(l => l.completed).length;
     const total = leaves.length;
     const srdLines = leaves.map(l => {
       const mods = l.moduleLabels.length > 0 ? l.moduleLabels.join('·') : '未分配';
-      return `- ${l.completed ? '✅' : '🟡'} ${l.name} [${mods}]`;
+      return `- ${l.completed ? '✅' : '🟡'} ${l.name} [${mods}] — ${uname(l.creator)}`;
     }).join('\n');
 
     parts.push(
@@ -381,14 +435,18 @@ export async function checkProgressDeviation(nodeDurations: Record<string, numbe
     const actual = leaves.length > 0 ? (completed / leaves.length) * 100 : 0;
     const deviation = Math.round(actual - expected);
 
-    if (deviation > -15) continue; // 偏离未超阈值
+    if (deviation > -15) continue;
+
+    // 批量解析用户名
+    for (const l of leaves) { if (l.creator) await resolveUserName(l.creator); }
+    const uname = (uk: string) => userNameCache[uk] || uk.slice(-8);
 
     const nowStr = new Date().toLocaleString('zh-CN');
     const undoneLeaves = leaves.filter(l => !l.completed).map(l => {
       const mods = l.moduleLabels.length > 0 ? l.moduleLabels.join('·') : '未分配';
       const srdDetail = srdMap.get(Number(l.id));
       const currentNode = srdDetail?.workflow_nodes?.find(n => n.status === 2);
-      return `🔴 ${l.name}（${mods}）— ${currentNode?.name || '待开发'}`;
+      return `🔴 ${l.name}（${mods}·${uname(l.creator)}）— ${currentNode?.name || '待开发'}`;
     }).join('\n');
 
     const tag = deviation <= -30 ? '🔴 严重落后' : '🟡 偏慢';
