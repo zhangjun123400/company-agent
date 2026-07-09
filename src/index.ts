@@ -148,7 +148,7 @@ app.get('/auth/feishu-login', (req, res) => {
     `?app_id=${FEISHU_APP_ID}` +
     `&redirect_uri=${encodeURIComponent(`http://localhost:${PORT}/auth/callback`)}` +
     `&state=${state}` +
-    `&scope=${encodeURIComponent('wiki:wiki wiki:node:read docx:document:readonly')}`;
+    `&scope=${encodeURIComponent('wiki:wiki wiki:node:read docx:document docx:document:readonly')}`;
   res.redirect(authUrl);
 });
 
