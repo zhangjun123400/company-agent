@@ -16,10 +16,13 @@ interface ReminderRule {
   name: string;
   description: string;
   trigger: {
-    on: 'after_create' | 'after_node_completed';
+    on: 'after_create' | 'after_node_completed' | 'version_node_completed' | 'version_progress';
     workItemType?: string;
     previousNode?: string;
+    completedNode?: string;
+    deviationThreshold?: number;
   };
+  nodeDurations?: Record<string, number>;
   targetNode: string;
   timeoutMinutes: number;
   remind: {
@@ -144,6 +147,22 @@ class TimeWheel {
   // ==================== 规则检查 ====================
 
   private async checkRule(rule: ReminderRule): Promise<number> {
+    // 版本管理规则 — 由 handler 统一处理，不逐 item 检查
+    if (rule.trigger.on === 'version_node_completed' || rule.trigger.on === 'version_progress') {
+      const state = this.loadState();
+      const stateKey = `${rule.id}::version`;
+      const lastRun = state[stateKey] || 0;
+      // version_node_completed 只执行一次（通过 state 持久化去重）
+      // version_progress 每次 tick 都检查
+      if (rule.trigger.on === 'version_progress' || Date.now() - lastRun > 7 * 24 * 60 * 60 * 1000) {
+        await this.handleVersionRule(rule);
+        state[stateKey] = Date.now();
+        this.saveState(state);
+        return 1;
+      }
+      return 0;
+    }
+
     const items = await this.fetchWorkItems(rule);
     const state = this.loadState();
     let sent = 0;
@@ -151,10 +170,8 @@ class TimeWheel {
     for (const item of items) {
       if (!item.workflow_nodes) continue;
 
-      // 去重：已完成的工作项不再提醒，已提醒过的跳过
       const stateKey = `${rule.id}::${item.id}`;
       const lastReminded = state[stateKey] || 0;
-      // 24 小时内已经提醒过 → 跳过
       if (Date.now() - lastReminded < 24 * 60 * 60 * 1000) continue;
 
       const isOverdue = rule.trigger.on === 'after_create'
@@ -166,7 +183,6 @@ class TimeWheel {
         state[stateKey] = Date.now();
         sent++;
       } else if (this.isCompleted(item, rule.targetNode)) {
-        // 已完成 → 清除提醒记录，释放存储
         delete state[stateKey];
       }
     }
@@ -291,6 +307,89 @@ class TimeWheel {
     const found = types.find((tp: { name: string; type_key: string }) => tp.name === typeName);
     if (!found) console.warn(`[TimeWheel] 类型名 "${typeName}" 未匹配，降级为 story`);
     return found ? found.type_key : 'story';
+  }
+
+  // ==================== 版本规则处理 ====================
+
+  private async handleVersionRule(rule: ReminderRule): Promise<void> {
+    try {
+      const { runHeadcount, runScheduleNotice, checkProgressDeviation } = require('../../skills/version-manager/handler');
+      const { feishuApp } = await import('../config');
+      const { default: axios } = await import('axios');
+
+      const t = await (async () => {
+        const r = await axios.post('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
+          { app_id: feishuApp.appId, app_secret: feishuApp.appSecret });
+        return r.data.tenant_access_token as string;
+      })();
+      const H = { Authorization: `Bearer ${t}` };
+
+      if (rule.trigger.on === 'version_node_completed') {
+        // 人力盘点 + 排期通知（一次性）
+        const [headcount, schedule] = await Promise.all([runHeadcount(), runScheduleNotice()]);
+        // 上传为飞书文档
+        for (const [title, content] of [['版本人力盘点报告', headcount], ['版本排期通知', schedule]]) {
+          try {
+            const docUrl = await this.uploadAsDoc(title, content, H);
+            await this.notifyUser(rule, docUrl, title, H);
+          } catch (e) { console.error(`[TimeWheel] ${title} 上传失败:`, e); }
+        }
+      } else if (rule.trigger.on === 'version_progress') {
+        const nodeDurations = rule.nodeDurations || {};
+        const report = await checkProgressDeviation(nodeDurations);
+        if (report) {
+          const docUrl = await this.uploadAsDoc('版本进度偏离报告', report, H);
+          await this.notifyUser(rule, docUrl, '版本进度偏离报告', H);
+        }
+      }
+    } catch (e) { console.error('[TimeWheel] 版本规则执行失败:', e); }
+  }
+
+  private async uploadAsDoc(title: string, content: string, H: Record<string, string>): Promise<string> {
+    const fs = await import('fs'); const path = await import('path');
+    const FormData = (await import('form-data')).default;
+    const OUTPUT_DIR = path.resolve(__dirname, '../../output');
+    if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+    const fileName = `${title.replace(/[\\/:*?"<>|]/g, '_')}.md`;
+    const filePath = path.join(OUTPUT_DIR, fileName);
+    fs.writeFileSync(filePath, content, 'utf8');
+    const axios = await import('axios');
+
+    try {
+      const fd = new FormData();
+      fd.append('file_name', fileName);
+      fd.append('parent_type', 'explorer');
+      fd.append('parent_node', '');
+      fd.append('size', String(fs.statSync(filePath).size));
+      fd.append('file', fs.createReadStream(filePath));
+      const u = await axios.default.post('https://open.feishu.cn/open-apis/drive/v1/files/upload_all', fd, {
+        headers: { ...H, ...fd.getHeaders() }, maxContentLength: Infinity, maxBodyLength: Infinity,
+      });
+      const fileToken = u.data.data?.file_token;
+      if (fileToken) return `https://p1iscu6mj28.feishu.cn/file/${fileToken}`;
+    } catch (e) { /* fallback */ }
+
+    const cr = await axios.default.post('https://open.feishu.cn/open-apis/docx/v1/documents', { title }, { headers: H });
+    return `https://p1iscu6mj28.feishu.cn/docx/${cr.data.data.document.document_id}`;
+  }
+
+  private async notifyUser(rule: ReminderRule, docUrl: string, title: string, H: Record<string, string>): Promise<void> {
+    const openId = rule.remind.fallbackUserKey
+      ? await resolveUserKey(rule.remind.fallbackUserKey)
+      : null;
+    if (!openId) { console.log(`[TimeWheel] 版本通知无接收人`); return; }
+    const axios = await import('axios');
+    await axios.default.post('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id', {
+      receive_id: openId, msg_type: 'interactive',
+      content: JSON.stringify({
+        config: { wide_screen_mode: true },
+        header: { title: { content: `📄 ${title}`, tag: 'plain_text' }, template: 'blue' },
+        elements: [
+          { tag: 'markdown', content: `**版本管理报告**已生成。\n\n👉 [点击查看](${docUrl})` },
+          { tag: 'hr' }, { tag: 'note', elements: [{ tag: 'plain_text', content: '🤖 智小协自动生成' }] },
+        ],
+      }),
+    }, { headers: H, timeout: 10000 }).catch((e: unknown) => console.error('[TimeWheel] 通知发送失败'));
   }
 
   // ==================== 发送提醒 ====================
