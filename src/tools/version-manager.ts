@@ -685,48 +685,37 @@ export async function runScheduleNotice(versionId?: string): Promise<string> {
       return `- ${l.completed ? '✅' : '🟡'} ${l.name} [${mods}] — ${uname(l.creator)}`;
     }).join('\n');
 
-    // 时间线可视化
-    const nodeNames = allNodes.map(n => n.name);
-    const maxNameLen = Math.max(...nodeNames.map(n => n.length), 4);
-    const timelineWidth = 50;
-    const totalNodes = allNodes.length;
     const doneNodes = allNodes.filter(n => n.status === 3).length;
-    const timeline = allNodes.map((n, i) => {
-      const marker = n.status === 3 ? '█' : n.status === 2 ? '▓' : '░';
-      const seg = marker.repeat(Math.floor(timelineWidth / totalNodes));
-      return seg;
+    const tlParts: string[] = [];
+    for (let i = 0; i < allNodes.length; i++) {
+      const n = allNodes[i];
+      const cls = n.status === 3 ? 'done' : n.status === 2 ? 'active' : 'pending';
+      const date = n.actual_begin_time ? n.actual_begin_time.slice(0, 10) : '';
+      const extra = n.status === 2 ? ` → 第${Math.round((Date.now() - new Date(n.actual_begin_time || Date.now()).getTime()) / 86400000)}天` : '';
+      tlParts.push(`<div class="tl-node"><div class="tl-dot ${cls}"></div><div class="tl-label">${n.name}</div><div class="tl-date">${date}${extra}</div></div>`);
+      if (i < allNodes.length - 1) tlParts.push(`<div class="tl-line ${n.status === 3 && allNodes[i + 1].status !== 1 ? 'done' : ''}"></div>`);
+    }
+
+    const nodeRows = allNodes.map(n => {
+      if (n.status === 3 && n.actual_finish_time) return `<tr><td>${n.name}</td><td>✅ 已完成</td><td>${n.actual_finish_time.slice(0, 10)}</td></tr>`;
+      if (n.status === 2 && n.actual_begin_time) return `<tr><td>${n.name}</td><td>🔄 进行中</td><td>${n.actual_begin_time.slice(0, 10)} 起</td></tr>`;
+      return `<tr><td>${n.name}</td><td>⏳ 待开始</td><td>-</td></tr>`;
     }).join('');
-    const markers = allNodes.map((n, i) => {
-      const pos = Math.floor(timelineWidth / totalNodes) * i;
-      const icon = n.status === 3 ? '✅' : n.status === 2 ? '🔽' : '○';
-      return ' '.repeat(Math.max(0, pos - i * 3)) + icon + n.name.slice(0, 2);
-    }).filter(m => m.trim()).join('');
+
+    const srdHtml = leaves.map(l => {
+      const mods = l.moduleLabels.length > 0 ? l.moduleLabels.join('·') : '未分配';
+      return `<li>${l.completed ? '✅' : '🟡'} ${l.name} [${mods}] — ${uname(l.creator)}</li>`;
+    }).join('');
 
     parts.push(
-      `## ${v.name} 已定版`,
-      ``,
-      `### 版本时间线`,
-      `\`\`\``,
-      `${timeline}`,
-      `\`\`\``,
-      `▲ 当前节点：${allNodes.find(n => n.status === 2)?.name || '已完成'}`,
-      ``,
-      `### 节点排期`,
-      `| 节点 | 状态 | 时间 |`,
-      `|------|------|------|`,
-      ...allNodes.map(n => {
-        if (n.status === 3 && n.actual_finish_time) return `| ${n.name} | ✅ 已完成 | ${n.actual_finish_time.slice(0, 10)} |`;
-        if (n.status === 2 && n.actual_begin_time) return `| ${n.name} | 🔄 进行中 | ${n.actual_begin_time.slice(0, 10)} 起 |`;
-        return `| ${n.name} | ⏳ 待开始 | - |`;
-      }),
-      ``,
-      `### 进度统计`,
-      `- 已完成：${doneNodes}/${totalNodes} 节点`,
-      `- 完成率：${Math.round(doneNodes/totalNodes*100)}% ${'█'.repeat(Math.round(doneNodes/totalNodes*10))}${'░'.repeat(10-Math.round(doneNodes/totalNodes*10))}`,
-      ``,
-      `### SRD 叶子任务（${done}/${total} 完成）`,
-      ...(srdLines ? srdLines.split('\n') : ['（无）']),
-      ``,
+      `<div class="card"><div style="font-size:17px;font-weight:700;margin-bottom:16px">${v.name}</div>`,
+      `<div style="font-size:14px;font-weight:600;margin-bottom:12px">节点时间线</div>`,
+      `<div class="timeline">${tlParts.join('')}</div>`,
+      `<div style="font-size:14px;font-weight:600;margin:20px 0 12px">节点排期</div>`,
+      `<table><thead><tr><th>节点</th><th>状态</th><th>时间</th></tr></thead><tbody>${nodeRows}</tbody></table>`,
+      `<div style="font-size:14px;font-weight:600;margin:20px 0 12px">SRD 叶子任务（${done}/${total} 完成）</div>`,
+      total > 0 ? `<ul class="issue-list">${srdHtml || '<li>无</li>'}</ul>` : '<div style="color:#94A3B8">无 SRD 数据</div>',
+      `</div>`,
     );
   }
 
