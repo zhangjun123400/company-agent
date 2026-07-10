@@ -199,11 +199,14 @@ ${['极高风险','高风险','中风险','低风险'].map(lv=>`<span style="pad
   const token = await getTenantToken();
   const allRecipients = [...new Set([...proposerOpenIds, ...techRecipients, requester].filter(Boolean))];
   for (const url of [clarDocParsed.url, techDocParsed.url, nuddDocParsed.url].filter(Boolean)) {
-    const match = url.match(/\/file\/([A-Za-z0-9]+)/);
-    if (match) {
+    const fileMatch = url.match(/\/file\/([A-Za-z0-9]+)/);
+    const docxMatch = url.match(/\/docx\/([A-Za-z0-9]+)/);
+    const tokenId = fileMatch?.[1] || docxMatch?.[1];
+    const permType = fileMatch ? 'file' : 'docx';
+    if (tokenId) {
       for (const oid of allRecipients) {
         await axios.post(
-          `https://open.feishu.cn/open-apis/drive/v1/permissions/${match[1]}/members?type=file`,
+          `https://open.feishu.cn/open-apis/drive/v1/permissions/${tokenId}/members?type=${permType}`,
           { member_type: 'openid', member_id: oid, perm: 'full_access' },
           { headers: { Authorization: `Bearer ${token}` } }
         ).catch(() => {});
