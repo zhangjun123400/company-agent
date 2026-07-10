@@ -16,8 +16,9 @@ interface CacheEntry {
   prdHash: string;
   clarificationUrl: string;
   techReportUrl: string;
-  generatedAt: number;  // epoch ms
-  expiresAt: number;    // epoch ms
+  nuddUrl?: string;
+  generatedAt: number;
+  expiresAt: number;
 }
 
 function cacheFile(workItemId: string): string {
@@ -63,23 +64,12 @@ export function getCachedReport(workItemId: string, prdText: string): CacheEntry
 
 /** 存入缓存 */
 export function setCachedReport(
-  workItemId: string,
-  workItemName: string,
-  prdText: string,
-  clarificationUrl: string,
-  techReportUrl: string,
+  workItemId: string, workItemName: string, prdText: string,
+  clarificationUrl: string, techReportUrl: string, nuddUrl?: string,
 ): void {
   initCacheDir();
   const now = Date.now();
-  const entry: CacheEntry = {
-    workItemId,
-    workItemName,
-    prdHash: hashContent(prdText),
-    clarificationUrl,
-    techReportUrl,
-    generatedAt: now,
-    expiresAt: now + CACHE_TTL_MS,
-  };
+  const entry: CacheEntry = { workItemId, workItemName, prdHash: hashContent(prdText), clarificationUrl, techReportUrl, nuddUrl, generatedAt: now, expiresAt: now + CACHE_TTL_MS };
   fs.writeFileSync(cacheFile(workItemId), JSON.stringify(entry, null, 2), 'utf-8');
   console.log(`[Cache] 💾 已缓存: ${workItemName} (${workItemId})`);
 }

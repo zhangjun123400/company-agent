@@ -90,6 +90,11 @@ export async function handleNewRequirement(workItemId: string, requester?: strin
     }
     for (const oid of techRecipients) {
       if (!servedTech.has(oid)) { servedTech.add(oid); await sendReportCard(oid, '技术可行性初评报告', workItem.name, cached.techReportUrl); }
+      if (cached.nuddUrl && oid !== requester) await sendReportCard(oid, 'NUDD风险登记表', workItem.name, cached.nuddUrl);
+    }
+    // 触发人 NUDD
+    if (cached.nuddUrl && requester && requesterChatId) {
+      await sendReportCard(requesterChatId, 'NUDD风险登记表', workItem.name, cached.nuddUrl, 'chat_id');
     }
     // 3. 技术负责人也发需求澄清
     for (const oid of techOids) {
@@ -98,7 +103,7 @@ export async function handleNewRequirement(workItemId: string, requester?: strin
     // 缓存命中时也给所有相关人员加权限
     const token = await getTenantToken();
     const allRecipients = [...new Set([...proposerOids, ...techRecipients, requester].filter(Boolean))];
-    for (const url of [cached.clarificationUrl, cached.techReportUrl]) {
+    for (const url of [cached.clarificationUrl, cached.techReportUrl, cached.nuddUrl].filter(Boolean) as string[]) {
       const match = url.match(/\/file\/([A-Za-z0-9]+)/);
       if (match) {
         for (const oid of allRecipients) {
@@ -173,7 +178,7 @@ export async function handleNewRequirement(workItemId: string, requester?: strin
   const techDocParsed = { url: techDoc };
 
   // 写入缓存（14天有效）
-  setCachedReport(workItemId, workItem.name, prdText, clarDocParsed.url, techDocParsed.url);
+  setCachedReport(workItemId, workItem.name, prdText, clarDocParsed.url, techDocParsed.url, nuddDocParsed.url || undefined);
 
   const proposer = workItem.owner || '';
   const techOwner = findNodeOwner(workItem.current_nodes, '技术可行性确认')
