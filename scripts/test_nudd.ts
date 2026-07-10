@@ -28,7 +28,7 @@ async function run() {
 
   if(!Array.isArray(items)||items.length===0){console.log('空数组, 退出');return;}
 
-  // 4. Create spreadsheet
+  // 4. Create spreadsheet (v3)
   console.log('\n=== 创建飞书电子表格...');
   const t=await axios.post('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',{app_id:process.env.FEISHU_APP_ID,app_secret:process.env.FEISHU_APP_SECRET});
   const H={Authorization:'Bearer '+t.data.tenant_access_token,'Content-Type':'application/json'};
@@ -36,13 +36,19 @@ async function run() {
   const ssToken=ssR.data.data?.spreadsheet?.spreadsheet_token;
   console.log('表格token:',ssToken);
 
+  // 5. Get sheetId (v2 metainfo)
+  const metaR=await axios.get('https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/'+ssToken+'/metainfo',{headers:H});
+  const sheetId:string=metaR.data.data?.sheets?.[0]?.sheetId||'0';
+  console.log('sheetId:',sheetId);
+
+  // 6. Write data (v2)
   const headers=['编号','模块','风险项描述','N','U','D(难)','D(异)','总分','等级','影响面','应对方案','解决时间','责任人','状态','备注'];
   const rows=[headers,...items.map((r:any)=>headers.map(h=>String(r[h]||'')))];
-  const wr=await axios.post(`https://open.feishu.cn/open-apis/sheets/v3/spreadsheets/${ssToken}/values`,{valueRange:{range:'Sheet1!A1:O'+(rows.length),values:rows}},{headers:H});
-  console.log('写入结果:',wr.data.code,wr.data.msg||'成功');
+  const wr=await axios.put('https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/'+ssToken+'/values',{valueRange:{range:sheetId+'!A1:O'+rows.length,values:rows}},{headers:H});
+  console.log('写入:',wr.data.code,wr.data.msg||'成功');
 
-  // 5. Grant permissions
-  await axios.post(`https://open.feishu.cn/open-apis/drive/v1/permissions/${ssToken}/members?type=sheet`,{member_type:'openid',member_id:'ou_8de837db0c63b31eaebbb465c18c9ea8',perm:'full_access'},{headers:H}).catch(()=>{});
-  console.log('\n✅ 完成! https://p1iscu6mj28.feishu.cn/sheets/'+ssToken);
+  // 7. Grant
+  await axios.post('https://open.feishu.cn/open-apis/drive/v1/permissions/'+ssToken+'/members?type=sheet',{member_type:'openid',member_id:'ou_8de837db0c63b31eaebbb465c18c9ea8',perm:'full_access'},{headers:H}).catch(()=>{});
+  console.log('\n✅ https://p1iscu6mj28.feishu.cn/sheets/'+ssToken);
 }
 run().catch(e=>console.error('失败:',e.response?.data||e.message));
