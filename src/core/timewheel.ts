@@ -332,9 +332,10 @@ class TimeWheel {
       if (rule.trigger.on === 'version_node_completed') {
         // 人力盘点 + 排期通知（一次性）
         const [headcount, schedule] = await Promise.all([runHeadcount(), runScheduleNotice()]);
+        const { publishAsHtml } = require('../tools/version-manager');
         for (const [title, content] of [['版本人力盘点报告', headcount], ['版本排期通知', schedule]]) {
           try {
-            const docUrl = await this.uploadAsDoc(title, content, H, targetOpenId);
+            const docUrl = await publishAsHtml(title, content);
             await this.notifyUser(docUrl, title, H, targetOpenId);
           } catch (e) { console.error(`[TimeWheel] ${title} 上传失败:`, e); }
         }
@@ -342,7 +343,8 @@ class TimeWheel {
         const nodeDurations = rule.nodeDurations || {};
         const report = await checkProgressDeviation(nodeDurations);
         if (report) {
-          const docUrl = await this.uploadAsDoc('版本进度偏离报告', report, H, targetOpenId);
+          const { publishAsHtml } = require('../tools/version-manager');
+          const docUrl = await publishAsHtml('版本进度偏离报告', report);
           await this.notifyUser(docUrl, '版本进度偏离报告', H, targetOpenId);
         }
       }
