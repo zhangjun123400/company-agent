@@ -115,16 +115,18 @@ export async function handleNewRequirement(workItemId: string, requester?: strin
 
   const toolCtx: ToolContext = { workItemId, workItemName: workItem.name, nodeName: '', fields: {}, prdContent: prdText };
 
-  // 并行：需求澄清 + 技术可行性 + NUDD 风险分析
+  // 并行：需求澄清 + 技术可行性
   const clarSkillBody = loadAgentSkill('需求分析');
   const techSkillBody = loadAgentSkill('技术可行性初评');
-  const nuddSkillBody = loadAgentSkill('NUDD风险分析');
-
-  const [clarContentRaw, techContentRaw, nuddContentRaw] = await Promise.all([
+  const [clarContentRaw, techContentRaw] = await Promise.all([
     toolRegistry.get('ai:analyze')!.execute({ ...toolCtx, skillBody: clarSkillBody }),
     toolRegistry.get('ai:analyze')!.execute({ ...toolCtx, skillBody: techSkillBody }),
-    toolRegistry.get('ai:analyze')!.execute({ ...toolCtx, skillBody: nuddSkillBody }),
   ]);
+
+  // 串行：NUDD 基于技术可行性报告做风险识别
+  const nuddSkillBody = loadAgentSkill('NUDD风险分析');
+  const nuddContext = `## 技术可行性分析结论\n\n${techContentRaw}`;
+  const nuddContentRaw = await toolRegistry.get('ai:analyze')!.execute({ ...toolCtx, skillBody: nuddSkillBody, previousOutput: nuddContext });
 
   // 格式化标题 & 创建文档
   const clarFull = `# ${workItem.name} · 需求澄清问题清单\n\n> 📎 PRD：${prd.prdUrl}\n> 🕐 ${new Date().toLocaleString('zh-CN')}\n\n---\n\n${clarContentRaw}`;
@@ -196,7 +198,7 @@ ${['极高风险','高风险','中风险','低风险'].map(lv=>`<span style="pad
   // 给所有相关人员加文件权限
   const token = await getTenantToken();
   const allRecipients = [...new Set([...proposerOpenIds, ...techRecipients, requester].filter(Boolean))];
-  for (const url of [clarDocParsed.url, techDocParsed.url]) {
+  for (const url of [clarDocParsed.url, techDocParsed.url, nuddDocParsed.url].filter(Boolean)) {
     const match = url.match(/\/file\/([A-Za-z0-9]+)/);
     if (match) {
       for (const oid of allRecipients) {
