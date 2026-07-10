@@ -77,22 +77,10 @@ h1{text-align:center;color:#1a73e8;font-size:28px;margin:10px 0}
 <!-- PIPELINE -->
 <div class="pipeline">
 
-  <!-- N1: 需求提出 -->
-  <div class="node plain node-narrow">
-    <div class="node-title">📋 需求提出</div>
-    <div class="node-body">
-      <div style="text-align:center;color:#666;font-size:13px;line-height:1.5">
-        产品经理<br>上传 PRD 文档
-      </div>
-    </div>
-  </div>
-
-  <div class="arrow">→</div>
-
-  <!-- N2: 需求评审 DONE -->
+  <!-- N1: 需求阶段 DONE -->
   <div class="node done node-wide">
     <span class="badge badge-ok">✅ 已实现</span>
-    <div class="node-title">🔍 需求评审</div>
+    <div class="node-title">📋 需求阶段</div>
     <div class="node-body">
       <div class="agent">
         <div class="agent-name">需求分析智能体</div>
@@ -102,74 +90,82 @@ h1{text-align:center;color:#1a73e8;font-size:28px;margin:10px 0}
         <div class="agent-name">技术可行性初评智能体</div>
         <div class="agent-output">→ 技术可行性初评报告</div>
       </div>
-      <div style="text-align:center;font-size:11px;color:#bbb">两个智能体并行，互不影响</div>
+      <div class="agent">
+        <div class="agent-name">NUDD风险分析智能体</div>
+        <div class="agent-output">→ NUDD风险登记表（电子表格）</div>
+      </div>
+      <div style="text-align:center;font-size:11px;color:#bbb">三份报告：澄清+技术+风险</div>
     </div>
   </div>
 
   <div class="arrow">→</div>
 
-  <!-- N3: 方案设计 -->
-  <div class="node todo node-wide">
-    <span class="badge badge-wip">🕐 待实现</span>
-    <div class="node-title">📐 方案设计</div>
+  <!-- N2: 版本启动 DONE -->
+  <div class="node done node-wide">
+    <span class="badge badge-ok">✅ 已实现</span>
+    <div class="node-title">🚀 版本启动</div>
     <div class="node-body">
       <div class="agent">
-        <div class="agent-name">技术方案生成智能体</div>
-        <div class="agent-output">→ 输出技术方案初稿</div>
+        <div class="agent-name">版本管理智能体</div>
+        <div class="agent-output">→ 人力盘点报告</div>
       </div>
       <div class="agent">
-        <div class="agent-name">方案评审兜底智能体</div>
-        <div class="agent-output">→ 输出评审意见</div>
+        <div class="agent-name">版本管理智能体</div>
+        <div class="agent-output">→ 排期通知</div>
       </div>
     </div>
   </div>
 
   <div class="arrow">→</div>
 
-  <!-- N4: 开发实现 -->
-  <div class="node todo node-wide">
-    <span class="badge badge-wip">🕐 待实现</span>
-    <div class="node-title">💻 开发实现</div>
+  <!-- N3: SRD开发 DONE -->
+  <div class="node done node-wide">
+    <span class="badge badge-ok">✅ 已实现</span>
+    <div class="node-title">💻 SRD / 开发阶段</div>
     <div class="node-body">
       <div class="agent">
-        <div class="agent-name">代码审查智能体</div>
-        <div class="agent-output">→ 输出代码审查报告</div>
+        <div class="agent-name">版本管理智能体</div>
+        <div class="agent-output">→ 进度偏离报告</div>
       </div>
       <div class="agent">
-        <div class="agent-name">文档生成智能体</div>
-        <div class="agent-output">→ 输出 API / 技术文档</div>
+        <div class="agent-name">定时提醒智能体</div>
+        <div class="agent-output">→ 节点超时自动 IM 提醒</div>
       </div>
     </div>
   </div>
 
   <div class="arrow">→</div>
 
-  <!-- N5: 测试验证 -->
+  <!-- N4: 测试验证 TODO -->
   <div class="node todo node-wide">
     <span class="badge badge-wip">🕐 待实现</span>
     <div class="node-title">🧪 测试验证</div>
     <div class="node-body">
       <div class="agent">
         <div class="agent-name">测试分析智能体</div>
-        <div class="agent-output">→ 输出测试重点和风险建议</div>
+        <div class="agent-output">→ 测试重点和风险建议</div>
       </div>
       <div class="agent">
-        <div class="agent-name">Bug 跟踪智能体</div>
-        <div class="agent-output">→ 输出测试完成结论</div>
+        <div class="agent-name">Bug跟踪智能体</div>
+        <div class="agent-output">→ 测试完成结论</div>
       </div>
     </div>
   </div>
 
   <div class="arrow">→</div>
 
-  <!-- N6: 定时提醒 -->
-  <div class="node done node-narrow">
-    <span class="badge badge-ok">✅ 已实现</span>
-    <div class="node-title">⏰ 定时提醒</div>
+  <!-- N5: 回归测试 TODO -->
+  <div class="node todo node-wide">
+    <span class="badge badge-wip">🕐 待实现</span>
+    <div class="node-title">🔄 回归测试</div>
     <div class="node-body">
       <div class="agent">
-        <div class="agent-name">定时提醒智能体</div>
-        <div class="agent-output">→ 节点超时自动 IM 提醒</div>
+        <div class="agent-name">测试分析智能体</div>
+        <div class="agent-output">→ 测试重点和风险建议</div>
+      </div>
+      <div class="agent">
+        <div class="agent-name">Bug跟踪智能体</div>
+        <div class="agent-output">→ 测试完成结论</div>
       </div>
     </div>
   </div>
