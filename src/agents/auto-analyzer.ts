@@ -148,14 +148,14 @@ export async function handleNewRequirement(workItemId: string, requester?: strin
       // 创建飞书电子表格
       const t = await getTenantToken();
       const H = { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' };
-      const ssRes = await axios.post('https://open.feishu.cn/open-apis/sheets/v2/spreadsheets',
+      const ssRes = await axios.post('https://open.feishu.cn/open-apis/sheets/v3/spreadsheets',
         { title: `${workItem.name} · NUDD风险登记表` }, { headers: H });
       const ssToken = ssRes.data.data?.spreadsheet?.spreadsheet_token;
       if (!ssToken) throw new Error('创建电子表格失败');
 
       // 写入表头 + 数据
       const rows = [headers, ...nuddItems.map(r => headers.map(h => String(r[h]||'')))];
-      await axios.post(`https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/${ssToken}/values`,
+      await axios.post(`https://open.feishu.cn/open-apis/sheets/v3/spreadsheets/${ssToken}/values`,
         { valueRange: { range: 'Sheet1!A1:O'+(rows.length), values: rows } }, { headers: H });
 
       nuddDocParsed = { url: `https://p1iscu6mj28.feishu.cn/sheets/${ssToken}` };
