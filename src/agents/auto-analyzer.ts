@@ -140,28 +140,34 @@ export async function handleNewRequirement(workItemId: string, requester?: strin
   // 解析 NUDD JSON → 写入飞书电子表格
   let nuddDocParsed = { url: '' };
   try {
-    const nuddJson = nuddContentRaw.replace(/```json|```/g, '').trim();
+    const nuddJson = nuddContentRaw.replace(/```json|```/g, '').replace(/^[^{[]*/, '').trim();
     const nuddItems: Array<Record<string,string|number>> = JSON.parse(nuddJson);
     if (Array.isArray(nuddItems) && nuddItems.length > 0) {
       const headers = ['编号','模块','风险项描述','N','U','D(难)','D(异)','总分','等级','影响面','应对方案','解决时间','责任人','状态','备注'];
 
-      // 创建飞书电子表格
       const t = await getTenantToken();
       const H = { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' };
+
+      // 1. 创建电子表格 (v3)
       const ssRes = await axios.post('https://open.feishu.cn/open-apis/sheets/v3/spreadsheets',
         { title: `${workItem.name} · NUDD风险登记表` }, { headers: H });
       const ssToken = ssRes.data.data?.spreadsheet?.spreadsheet_token;
-      if (!ssToken) throw new Error('创建电子表格失败');
+      if (!ssToken) throw new Error('创建表格失败');
 
-      // 写入表头 + 数据
+      // 2. 获取 sheetId (v2 metainfo)
+      const metaRes = await axios.get(`https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/${ssToken}/metainfo`, { headers: H });
+      const sheetId: string = metaRes.data.data?.sheets?.[0]?.sheetId || '0';
+      if (!sheetId) throw new Error('获取sheetId失败');
+
+      // 3. 写入数据 (v2)
       const rows = [headers, ...nuddItems.map(r => headers.map(h => String(r[h]||'')))];
-      await axios.post(`https://open.feishu.cn/open-apis/sheets/v3/spreadsheets/${ssToken}/values`,
-        { valueRange: { range: 'Sheet1!A1:O'+(rows.length), values: rows } }, { headers: H });
+      await axios.put(`https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/${ssToken}/values`,
+        { valueRange: { range: `${sheetId}!A1:O${rows.length}`, values: rows } }, { headers: H });
 
       nuddDocParsed = { url: `https://p1iscu6mj28.feishu.cn/sheets/${ssToken}` };
-      console.log(`[NUDD] 电子表格已创建: ${nuddDocParsed.url}`);
+      console.log(`[NUDD] 电子表格: ${nuddDocParsed.url}`);
     }
-  } catch (e) { console.error('[NUDD] 电子表格生成失败:', e); }
+  } catch (e) { console.error('[NUDD] 表格生成失败:', e); }
 
   const clarDocParsed = { url: clarDoc };
   const techDocParsed = { url: techDoc };
@@ -184,8 +190,9 @@ export async function handleNewRequirement(workItemId: string, requester?: strin
   for (const url of [clarDocParsed.url, techDocParsed.url, nuddDocParsed.url].filter(Boolean)) {
     const fileMatch = url.match(/\/file\/([A-Za-z0-9]+)/);
     const docxMatch = url.match(/\/docx\/([A-Za-z0-9]+)/);
-    const tokenId = fileMatch?.[1] || docxMatch?.[1];
-    const permType = fileMatch ? 'file' : 'docx';
+    const sheetMatch = url.match(/\/sheets\/([A-Za-z0-9]+)/);
+    const tokenId = fileMatch?.[1] || docxMatch?.[1] || sheetMatch?.[1];
+    const permType = fileMatch ? 'file' : docxMatch ? 'docx' : 'sheet';
     if (tokenId) {
       for (const oid of allRecipients) {
         await axios.post(
