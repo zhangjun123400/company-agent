@@ -663,16 +663,6 @@ export async function runScheduleNotice(versionId?: string): Promise<string> {
   const parts: string[] = [];
   for (const v of targetVers) {
     const allNodes = v.workflow_nodes.filter(n => n.name !== '版本需求整理');
-    const nodeTable = [
-      `| 节点 | 状态 | 时间 |`,
-      `|------|------|------|`,
-      ...allNodes.map(n => {
-        if (n.status === 3 && n.actual_finish_time) return `| ${n.name} | ✅ 已完成 | ${n.actual_finish_time.slice(0, 10)} |`;
-        if (n.status === 2 && n.actual_begin_time) return `| ${n.name} | 🔄 进行中 | ${n.actual_begin_time.slice(0, 10)} 起 |`;
-        return `| ${n.name} | ⏳ 待开始 | - |`;
-      }),
-    ].join('\n');
-
     const srdIds = (extractField(v as unknown as Record<string, unknown>, '跟版SRD') as number[]) || [];
     const leaves = collectLeaves(srdIds.map(String), srdMap);
     // 批量解析用户名
@@ -680,12 +670,6 @@ export async function runScheduleNotice(versionId?: string): Promise<string> {
     const uname = (uk: string) => userNameCache[uk] || uk.slice(-8);
     const done = leaves.filter(l => l.completed).length;
     const total = leaves.length;
-    const srdLines = leaves.map(l => {
-      const mods = l.moduleLabels.length > 0 ? l.moduleLabels.join('·') : '未分配';
-      return `- ${l.completed ? '✅' : '🟡'} ${l.name} [${mods}] — ${uname(l.creator)}`;
-    }).join('\n');
-
-    const doneNodes = allNodes.filter(n => n.status === 3).length;
     const tlParts: string[] = [];
     for (let i = 0; i < allNodes.length; i++) {
       const n = allNodes[i];
@@ -769,21 +753,6 @@ export async function checkProgressDeviation(nodeDurations: Record<string, numbe
     }).join('\n');
 
     const tag = deviation <= -30 ? '🔴 严重落后' : '🟡 偏慢';
-
-    // 进度条可视化
-    const expBar = Math.round(expected / 10);
-    const actBar = Math.round(actual / 10);
-    const progressBar = `预期 █${'█'.repeat(Math.max(0, expBar-1))}${'░'.repeat(10-expBar)} ${Math.round(expected)}%\n实际 █${'█'.repeat(Math.max(0, actBar-1))}${'░'.repeat(10-actBar)} ${Math.round(actual)}%`;
-
-    // 风险矩阵
-    const riskMatrix = [
-      `| 影响 \\ 概率 | 低 | 中 | 高 |`,
-      `|------------|----|----|-----|`,
-      `| 大 | - | - | - |`,
-      `| 中 | - | 进度偏离 ${Math.abs(deviation)}% | - |`,
-      `| 小 | - | - | - |`,
-    ].join('\n');
-
     const undoneItems = leaves.filter(l=>!l.completed).map(l=>{const mods=l.moduleLabels.length>0?l.moduleLabels.join('·'):'未分配';const sd=srdMap.get(Number(l.id));const cn=sd?.workflow_nodes?.find(n=>n.status===2);return`<li><span class="issue-dot ${cn?'dot-amber':'dot-red'}"></span><strong>${l.name}</strong> — ${cn?.name||'待开发'} · ${mods} · ${uname(l.creator)}</li>`;}).join('');
     const sev=deviation<=-50?'紧急':deviation<=-30?'严重':'关注';
 
