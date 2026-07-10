@@ -143,9 +143,7 @@ export async function handleNewRequirement(workItemId: string, requester?: strin
     const nuddJson = nuddContentRaw.replace(/```json|```/g, '').replace(/^[^{[]*/, '').trim();
     const nuddItems: Array<Record<string,string|number>> = JSON.parse(nuddJson);
     if (Array.isArray(nuddItems) && nuddItems.length > 0) {
-      const DISPLAY_HEADERS = ['编号','模块','风险项描述','N','U','D(难)','D(异)','总分','等级','影响面','应对方案','解决时间','责任人','状态','备注'];
-      // AI输出的JSON字段名 → 表格表头映射
-      const KEY_MAP: Record<string,string> = {'D1':'D(难)','D2':'D(异)','N':'N','U':'U','编号':'编号','模块':'模块','风险项描述':'风险项描述','总分':'总分','等级':'等级','影响面':'影响面','应对方案':'应对方案','解决时间':'解决时间','责任人':'责任人','状态':'状态','备注':'备注'};
+      const HDR = ['编号','模块','风险项描述','N','U','D(难)','D(异)','总分','等级','影响面','应对方案','解决时间','责任人','状态','备注'];
 
       const t = await getTenantToken();
       const H = { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' };
@@ -161,11 +159,8 @@ export async function handleNewRequirement(workItemId: string, requester?: strin
       const sheetId: string = metaRes.data.data?.sheets?.[0]?.sheetId || '0';
       if (!sheetId) throw new Error('获取sheetId失败');
 
-      // 3. 写入数据 (v2)，AI输出的D1/D2字段映射到D(难)/D(异)列
-      const rows = [DISPLAY_HEADERS, ...nuddItems.map(r => DISPLAY_HEADERS.map(h => {
-        const jsonKey = Object.entries(KEY_MAP).find(([,v])=>v===h)?.[0] || h;
-        return String(r[jsonKey]||'');
-      }))];
+      // 3. 写入数据 (v2) — AI已按SKILL.md输出正确字段名，直接取值
+      const rows = [HDR, ...nuddItems.map(r => HDR.map(h => String(r[h]||'')))];
       await axios.put(`https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/${ssToken}/values`,
         { valueRange: { range: `${sheetId}!A1:O${rows.length}`, values: rows } }, { headers: H });
 
