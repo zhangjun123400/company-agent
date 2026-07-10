@@ -137,48 +137,31 @@ export async function handleNewRequirement(workItemId: string, requester?: strin
     toolRegistry.get('docx:create')!.execute({ ...toolCtx, previousOutput: techFull, workItemName: `${workItem.name} · 技术可行性初评报告` }),
   ]);
 
-  // 解析 NUDD JSON → HTML 表格
+  // 解析 NUDD JSON → 写入飞书电子表格
   let nuddDocParsed = { url: '' };
   try {
     const nuddJson = nuddContentRaw.replace(/```json|```/g, '').trim();
     const nuddItems: Array<Record<string,string|number>> = JSON.parse(nuddJson);
     if (Array.isArray(nuddItems) && nuddItems.length > 0) {
-      const headers = ['编号','模块','风险项描述','N','U','D(难)','D(异)','总分','等级','影响面','应对方案','解决时间','责任人','状态'];
-      const levelColors: Record<string,string> = {'极高风险':'#991B1B','高风险':'#DC2626','中风险':'#D97706','低风险':'#059669'};
-      const tableRows = nuddItems.map(r => `<tr>${headers.map(h => {
-        const v = String(r[h]||'');
-        if (h==='等级') return `<td><span style="display:inline-block;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:600;background:${levelColors[v]||'#E2E8F0'}20;color:${levelColors[v]||'#475569'}">${v}</span></td>`;
-        return `<td>${v}</td>`;
-      }).join('')}</tr>`).join('');
+      const headers = ['编号','模块','风险项描述','N','U','D(难)','D(异)','总分','等级','影响面','应对方案','解决时间','责任人','状态','备注'];
 
-      const total = nuddItems.length;
-      const highCount = nuddItems.filter((r:Record<string,unknown>) => String(r.等级||'').includes('高')).length;
-      const nuddHtml = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><style>
-body{font-family:Inter,-apple-system,sans-serif;background:#F1F5F9;color:#1E293B;padding:32px;line-height:1.6}
-.container{max-width:1100px;margin:0 auto}
-.header{background:linear-gradient(135deg,#1E3A5F 0%,#1D4ED8 100%);border-radius:16px;padding:40px;color:#FFF;margin-bottom:24px}
-.header h1{font-size:28px;margin-bottom:4px}.header .sub{font-size:14px;color:rgba(255,255,255,.65)}
-.metrics{display:flex;gap:16px;margin-top:24px}.metric{background:rgba(255,255,255,.1);border-radius:12px;padding:16px 24px;text-align:center}
-.metric .v{font-size:32px;font-weight:700}.metric .l{font-size:12px;color:rgba(255,255,255,.5);margin-top:4px}
-.card{background:#FFF;border-radius:14px;padding:24px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
-h2{font-size:18px;color:#1E293B;margin-bottom:12px}
-table{width:100%;border-collapse:collapse;font-size:12px}
-th{background:#F8FAFC;padding:8px 6px;text-align:left;border-bottom:2px solid #E2E8F0;font-size:11px;color:#64748B}
-td{padding:8px 6px;border-bottom:1px solid #F1F5F9;vertical-align:top}
-tr:hover td{background:#FAFBFC}
-.footer{margin-top:24px;text-align:center;color:#94A3B8;font-size:12px}
-</style></head><body><div class="container">
-<div class="header"><h1>⚠️ NUDD 风险登记表</h1><div class="sub">${workItem.name} · ${new Date().toLocaleString('zh-CN')} · AI 自动生成</div>
-<div class="metrics"><div class="metric"><div class="v">${total}</div><div class="l">风险项</div></div><div class="metric"><div class="v" style="color:#FCA5A5">${highCount}</div><div class="l">高风险以上</div></div></div></div>
-<div class="card"><h2>风险登记表（13 列）</h2><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${tableRows}</tbody></table></div>
-<div class="card"><h2>等级分布</h2><div style="display:flex;gap:12px;font-size:13px">
-${['极高风险','高风险','中风险','低风险'].map(lv=>`<span style="padding:4px 12px;border-radius:8px;background:${levelColors[lv]}20;color:${levelColors[lv]};font-weight:600">${lv}: ${nuddItems.filter((r:Record<string,unknown>)=>String(r.等级||'')===lv).length} 项</span>`).join('')}</div></div>
-<div class="footer">🤖 智小协 · NUDD 风险分析智能体</div></div></body></html>`;
+      // 创建飞书电子表格
+      const t = await getTenantToken();
+      const H = { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' };
+      const ssRes = await axios.post('https://open.feishu.cn/open-apis/sheets/v2/spreadsheets',
+        { title: `${workItem.name} · NUDD风险登记表` }, { headers: H });
+      const ssToken = ssRes.data.data?.spreadsheet?.spreadsheet_token;
+      if (!ssToken) throw new Error('创建电子表格失败');
 
-      const nuddDoc = await toolRegistry.get('docx:create')!.execute({ ...toolCtx, previousOutput: nuddHtml, workItemName: `${workItem.name} · NUDD风险登记表` });
-      nuddDocParsed = { url: nuddDoc };
+      // 写入表头 + 数据
+      const rows = [headers, ...nuddItems.map(r => headers.map(h => String(r[h]||'')))];
+      await axios.post(`https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/${ssToken}/values`,
+        { valueRange: { range: 'Sheet1!A1:O'+(rows.length), values: rows } }, { headers: H });
+
+      nuddDocParsed = { url: `https://p1iscu6mj28.feishu.cn/sheets/${ssToken}` };
+      console.log(`[NUDD] 电子表格已创建: ${nuddDocParsed.url}`);
     }
-  } catch (e) { console.error('[NUDD] 解析失败:', e); }
+  } catch (e) { console.error('[NUDD] 电子表格生成失败:', e); }
 
   const clarDocParsed = { url: clarDoc };
   const techDocParsed = { url: techDoc };
